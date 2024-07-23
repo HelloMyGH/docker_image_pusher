@@ -1,2 +1,3 @@
 xhofe/alist:latest
 tearsful/gecoosac:latest
+rustdesk/rustdesk-server
