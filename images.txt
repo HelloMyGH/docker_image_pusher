@@ -1,3 +1,4 @@
 xhofe/alist:latest
 tearsful/gecoosac:latest
 rustdesk/rustdesk-server
+p3terx/openwrt-build-env:20.04
