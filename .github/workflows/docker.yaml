@@ -3,8 +3,6 @@ name: Docker
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-
 
 env:
   IMAGE_NAME: "${{ secrets.IMAGE_NAME }}"
@@ -24,11 +22,10 @@ jobs:
       run: |
         echo "docker pull $IMAGE_NAME"
         docker pull $IMAGE_NAME
-        echo "docker save image"
-        docker tag $image $new_image
         echo "make dir to image_tar"
         mkdir temp
         cd temp
+        echo "docker save image"
         docker save -o ./docker_image.tar  $IMAGE_NAME
         
     - name: Upload docker directory
