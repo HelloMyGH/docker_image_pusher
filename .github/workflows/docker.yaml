@@ -31,5 +31,5 @@ jobs:
     - name: Upload docker directory
       uses: actions/upload-artifact@main
       with:
-        name: Upload_docker_images$IMAGE_NAME
+        name: Upload_docker_images_${{ secrets.IMAGE_NAME }}
         path: temp
