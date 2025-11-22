@@ -6,6 +6,7 @@ on:
 
 env:
   IMAGE_NAME: "${{ secrets.IMAGE_NAME }}"
+  CLEAN_NAME: "default-value"  # 默认值
 jobs:
 
   build:
@@ -24,11 +25,11 @@ jobs:
         mkdir temp
         cd temp
           while read -r image; do
-            CLEAN_NAME=$(echo  $image | sed 's/[:/]/_/g')
+            echo "CLEAN_NAME=$(echo  $image | sed 's/[:/]/_/g')" >> $GITHUB_ENV
             echo "Pulling $image..."
             docker pull "$image"
             echo "docker save $image"
-            docker save -o ./${{CLEAN_NAME}}.tar  $image
+            docker save -o ./${{env.CLEAN_NAME}}.tar  $image
           done <<< "${{ secrets.IMAGE_NAME }}"    
     - name: Upload docker directory
       uses: actions/upload-artifact@main
