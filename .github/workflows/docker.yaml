@@ -13,23 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Setup Docker buildx
-      uses: docker/setup-buildx-action@79abd3f86f79a9d68a23c75a09a9a85889262adf
+      uses: docker/setup-buildx-action@v3
 
     - name: Check out code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
-    - name: Push image
+    - name: Pull Docker images
       run: |
-        echo "docker pull $IMAGE_NAME"
-        docker pull $IMAGE_NAME
         echo "make dir to image_tar"
         mkdir temp
         cd temp
-        echo "docker save image"
-        docker save -o ./docker_image.tar  $IMAGE_NAME
-        
+          while read -r image; do
+            CLEAN_NAME=$(echo  $image | sed 's/[:/]/_/g')
+            echo "Pulling $image..."
+            docker pull "$image"
+            echo "docker save $image"
+            docker save -o ./${{CLEAN_NAME}}.tar  $image
+          done <<< "${{ secrets.IMAGE_NAME }}"    
     - name: Upload docker directory
       uses: actions/upload-artifact@main
       with:
-        name: Upload-${{ secrets.IMAGE_NAME }}
+        name: Upload_docker_images
         path: temp
