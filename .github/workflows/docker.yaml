@@ -6,33 +6,38 @@ on:
 
 env:
   IMAGE_NAME: "${{ secrets.IMAGE_NAME }}"
-  CLEAN_NAME: "default-value"  # 默认值
-jobs:
 
+jobs:
   build:
-    name: Pull
+    name: Pull and Package
     runs-on: ubuntu-latest
     steps:
-    - name: Setup Docker buildx
-      uses: docker/setup-buildx-action@v3
-
     - name: Check out code
       uses: actions/checkout@v4
 
-    - name: Pull Docker images
+    - name: Setup Docker buildx
+      uses: docker/setup-buildx-action@v3
+
+    # 步骤 1：转换镜像名称
+    - name: Set Clean Image Name
       run: |
-        echo "make dir to image_tar"
-        mkdir temp
-        cd temp
-          while read -r image; do
-            echo "CLEAN_NAME=$(echo  $image | sed 's/[:/]/_/g')" >> $GITHUB_ENV
-            echo "Pulling $image..."
-            docker pull "$image"
-            echo "docker save $image"
-            docker save -o ./${{env.CLEAN_NAME}}.tar  $image
-          done <<< "${{ secrets.IMAGE_NAME }}"    
-    - name: Upload docker directory
-      uses: actions/upload-artifact@main
+        CLEAN_STR=$(echo "${{ env.IMAGE_NAME }}" | sed 's/[:/]/_/g')
+        echo "CLEAN_NAME=$CLEAN_STR" >> $GITHUB_ENV
+
+    # 步骤 2：拉取并通过 gzip 压缩保存镜像
+    - name: Pull and Compress Docker image
+      run: |
+        echo "Pulling ${{ env.IMAGE_NAME }}..."
+        docker pull "${{ env.IMAGE_NAME }}"
+        
+        echo "Saving and compressing image to ${{ env.CLEAN_NAME }}.tar.gz ..."
+        # 使用管道配合 gzip 进行高比例压缩
+        docker save "${{ env.IMAGE_NAME }}" | gzip > "${{ env.CLEAN_NAME }}.tar.gz"
+
+    # 步骤 3：上传压缩包到 Action 页面
+    - name: Upload docker artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: Upload_docker_images
-        path: temp
+        name: "${{ env.CLEAN_NAME }}"
+        # 这里的后缀改为了 .tar.gz
+        path: "${{ env.CLEAN_NAME }}.tar.gz"
