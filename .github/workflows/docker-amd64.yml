@@ -1,12 +1,11 @@
 name: Build Docker AMD64
 
 on:
-  workflow_dispatch:        # 手动触发时，默认编译所有包含 Dockerfile 的文件夹
+  workflow_dispatch:
   push:
-    branches: [ "main" ]    # 推送到 main 分支时触发增量编译
+    branches: [ "main" ]
 
 jobs:
-  # 阶段一：动态扫描目录，并过滤出有代码变动的项目
   discover-projects:
     name: Discover Projects
     runs-on: ubuntu-latest
@@ -16,39 +15,28 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # 必须设置为 0，获取完整历史记录才能比对历史差异
+        fetch-depth: 0
 
     - name: Get Changed Directories
       id: set-matrix
       run: |
-        # 1. 确定比对的 Git 范围
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          # 如果是手动触发，视作全部变更，扫描所有包含 Dockerfile 的一级子目录
           CHANGED_DIRS=$(find . -maxdepth 2 -name "Dockerfile" | cut -d'/' -f2 | sort -u)
         else
-          # 如果是 git push，计算当前提交（或区间）发生了变化的文件
           if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            # 针对全新分支首次推送的情况，比对上一次 commit
             CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
           else
-            # 正常 push，比对本次推送前后的差异
             CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
           fi
-          
-          # 从变化的文件路径中，提取出发生改变的一级子目录名称
           CHANGED_DIRS=$(echo "$CHANGED_FILES" | cut -d'/' -f1 | sort -u)
         fi
 
-        # 2. 循环检查这些变动的目录里是否存在 Dockerfile
         JSON_OUTPUT="["
         HAS_VALID_PROJECT=false
         
         for dir in $CHANGED_DIRS; do
-          # 确保它是一个目录，且内部包含 Dockerfile
           if [ -d "$dir" ] && [ -f "$dir/Dockerfile" ]; then
             HAS_VALID_PROJECT=true
-            
-            # 解析下划线分割镜像名与标签
             if [[ "$dir" == *_* ]]; then
               raw_name="${dir%_*}"
               raw_tag="${dir##*_}"
@@ -56,37 +44,30 @@ jobs:
               raw_name="$dir"
               raw_tag="latest"
             fi
-            
-            # 转换为全小写
             img_name=$(echo "$raw_name" | tr '[:upper:]' '[:lower:]')
             img_tag=$(echo "$raw_tag" | tr '[:upper:]' '[:lower:]')
-            
             JSON_OUTPUT+="{\"dir\":\"$dir\",\"name\":\"$img_name\",\"tag\":\"$img_tag\"},"
           fi
         done
 
-        # 3. 处理最终的 JSON 输出
         if [ "$HAS_VALID_PROJECT" = true ]; then
           JSON_OUTPUT="${JSON_OUTPUT%,}]"
           echo "matrix=$JSON_OUTPUT" >> $GITHUB_OUTPUT
-          echo "Detected changed projects: $JSON_OUTPUT"
         else
-          # 如果没有任何受影响的项目，输出一个空数组
           echo "matrix=[]" >> $GITHUB_OUTPUT
-          echo "No project directories with Dockerfile were modified."
         fi
 
-  # 阶段二：根据发现的项目，并行开展编译
   build-amd64:
     name: Build AMD64
     needs: discover-projects
-    # 只有当检测到有变更项目时才启动编译，防止空矩阵导致工作流报错
-    if: ${{ needs:discover-projects.outputs.matrix != '[]' && needs:discover-projects.outputs.matrix != '' }}
+    # 修复后：使用方括号语法安全访问带连字符的 Job
+    if: ${{ needs['discover-projects'].outputs.matrix != '[]' && needs['discover-projects'].outputs.matrix != '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJson(needs:discover-projects.outputs.matrix) }}
+        # 修复后：使用方括号语法进行 json 解析
+        project: ${{ fromJson(needs['discover-projects'].outputs.matrix) }}
         
     steps:
     - name: Check out code
