@@ -12,6 +12,14 @@ LABEL description="ROS Noetic desktop container with Xfce + TigerVNC + noVNC"
 SHELL ["/bin/bash", "-c"]
 
 # -----------------------------------------------------------------------------
+# 0. Configure apt mirrors (speed up build in CN networks, harmless elsewhere)
+# -----------------------------------------------------------------------------
+# Replace Ubuntu default sources with Aliyun + Tsinghua mirrors (HTTP to avoid
+# ca-certificates requirement in base focal image)
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list && \
+    sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list
+
+# -----------------------------------------------------------------------------
 # 1. Base OS upgrade
 # -----------------------------------------------------------------------------
 RUN apt-get update -q && \

@@ -172,12 +172,13 @@ rm -rf /tmp/.X11-unix 2>/dev/null || true
 vncserver -kill :1 2>/dev/null || true
 sleep 1
 
-# Start VNC server
+# Start VNC server (-localhost no: bind 0.0.0.0 so Docker port map works)
+# TigerVNC 1.10.0 (Ubuntu 20.04 focal) uses '-localhost no' not '-no-localhost'
 if [ "\$(uname -m)" = "aarch64" ]; then
     LD_PRELOAD=/lib/aarch64-linux-gnu/libgcc_s.so.1 \
-        vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH}
+        vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH} -localhost no
 else
-    vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH}
+    vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH} -localhost no
 fi
 VNCRUN_EOF
 chmod +x "$VNCRUN"
