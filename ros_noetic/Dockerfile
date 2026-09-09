@@ -12,12 +12,32 @@ LABEL description="ROS Noetic desktop container with Xfce + TigerVNC + noVNC"
 SHELL ["/bin/bash", "-c"]
 
 # -----------------------------------------------------------------------------
-# 0. Configure apt mirrors (speed up build in CN networks, harmless elsewhere)
+# 0. Configure apt mirrors (speed up build in CN networks)
 # -----------------------------------------------------------------------------
-# Replace Ubuntu default sources with Aliyun + Tsinghua mirrors (HTTP to avoid
-# ca-certificates requirement in base focal image)
-RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list && \
-    sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list
+# USE_CN_MIRROR: auto (default) | true | false
+#   auto  → probe Aliyun reachability at build time; use mirrors only if reachable
+#   true  → force Aliyun (archive) + Tsinghua (security) mirrors
+#   false → keep Ubuntu official archive (GitHub Actions / overseas runners)
+# NOTE: the base focal image has neither curl nor wget, so the probe uses
+#       bash's built-in /dev/tcp with coreutils' timeout.
+ARG USE_CN_MIRROR=auto
+RUN set -eux; \
+    use_mirror=false; \
+    if [ "$USE_CN_MIRROR" = "true" ]; then \
+        use_mirror=true; \
+    elif [ "$USE_CN_MIRROR" = "auto" ] && \
+         timeout 8 bash -c 'exec 3<>/dev/tcp/mirrors.aliyun.com/80' 2>/dev/null; then \
+        use_mirror=true; \
+    fi; \
+    if [ "$use_mirror" = "true" ]; then \
+        echo "=> Using CN apt mirrors (Aliyun + Tsinghua)"; \
+        sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list; \
+        sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list; \
+    else \
+        echo "=> Using official Ubuntu archive (CN mirrors unreachable or disabled)"; \
+    fi; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80-retries
 
 # -----------------------------------------------------------------------------
 # 1. Base OS upgrade
