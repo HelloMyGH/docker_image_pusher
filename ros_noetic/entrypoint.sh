@@ -22,9 +22,10 @@ fi
 # 桌面显示层:Xvfb + xfce4 + RustDesk,由 supervisor 管理
 mkdir -p "$HOME/.config/rustdesk"
 cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk2.toml"
-rendezvous_server = '192.168.9.234:21116'
-verification-method = 'use-permanent-password'
+[options]
+custom-rendezvous-server = '192.168.9.234'
 relay-server = '192.168.9.234'
+verification-method = 'use-permanent-password'
 EOF
 cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk.toml"
 password = '01AWTA3qfH12dh+Jop4jhLowpGj4u3z6wXlUyJ7DNcEnRTU9yHieI6ApL6TJ3ma5zVuJmVSXmO3G7JZuUosQoJ7VCcw+jDbwpbZUrwK62+zG/MAPn1sR8t'
