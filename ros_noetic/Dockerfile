@@ -124,7 +124,8 @@ RUN rm /etc/apt/apt.conf.d/docker-clean
 COPY rustdesk-headless /usr/lib/rustdesk/rustdesk
 RUN chmod 755 /usr/lib/rustdesk/rustdesk
 
-COPY ./entrypoint.sh /
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 ENTRYPOINT [ "/bin/bash", "-c", "/entrypoint.sh" ]
 
 ENV USER ubuntu
