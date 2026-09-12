@@ -50,10 +50,20 @@ autorestart=true
 priority=20
 
 [program:rustdesk]
-command=gosu '$USER' bash -c 'sleep 8; export DISPLAY=:0 HOME=$HOME; /usr/lib/rustdesk/rustdesk --server --no-tray'
+command=bash /usr/lib/rustdesk/rustdesk_run.sh
 autorestart=true
 priority=30
 EOF
+
+# RustDesk wrapper(root 运行,euid=0 保证 IPC socket 在 /tmp/RustDesk-0/,并固定读 ubuntu 的配置目录)
+cat << 'EOF' > /usr/lib/rustdesk/rustdesk_run.sh
+#!/bin/bash
+sleep 8
+export DISPLAY=:0
+export HOME=/home/ubuntu
+exec /usr/lib/rustdesk/rustdesk --server --no-tray
+EOF
+chmod 755 /usr/lib/rustdesk/rustdesk_run.sh
 
 # colcon
 BASHRC_PATH="$HOME/.bashrc"
