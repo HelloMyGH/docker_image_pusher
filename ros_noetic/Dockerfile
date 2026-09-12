@@ -121,7 +121,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
 RUN rm /etc/apt/apt.conf.d/docker-clean
 
 # RustDesk 被控端(无 GUI,只做 server)
-COPY rustdesk-headless /usr/lib/rustdesk/rustdesk
+COPY rustdesk-headless/rustdesk /usr/lib/rustdesk/rustdesk
 RUN chmod 755 /usr/lib/rustdesk/rustdesk
 
 COPY ./entrypoint.sh /entrypoint.sh
