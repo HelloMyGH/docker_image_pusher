@@ -103,6 +103,7 @@ jobs:
         platforms: linux/amd64
         # 开启推送到远程仓库
         push: true
+        provenance: false
         # 拼接阿里云镜像标准格式：registry/namespace/repository:tag
         tags: |
           ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAME_SPACE }}/${{ matrix.project.name }}:${{ matrix.project.tag }}-amd64
