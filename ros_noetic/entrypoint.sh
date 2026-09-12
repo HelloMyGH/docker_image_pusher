@@ -1,268 +1,346 @@
 #!/bin/bash
-set -e
 
-# =============================================================================
-# ROS Noetic + Xfce + VNC Container Entrypoint
-# =============================================================================
-
-# --- Configuration defaults --------------------------------------------------
-DEFAULT_USER=${USER:-ubuntu}
-DEFAULT_PASSWORD=${PASSWORD:-ubuntu}
-VNC_PORT=${VNC_PORT:-5901}
-VNC_GEOMETRY=${VNC_GEOMETRY:-1280x720}
-VNC_DEPTH=${VNC_DEPTH:-24}
-ROS_DISTRO=${ROS_DISTRO:-noetic}
-
-# --- Create / configure user ------------------------------------------------
-HOME_DIR="/home/$DEFAULT_USER"
-echo "* Setting up user: $DEFAULT_USER"
-
-# Create user if not root
-if [ "$DEFAULT_USER" != "root" ] && ! id "$DEFAULT_USER" &>/dev/null; then
-    useradd --create-home --shell /bin/bash --user-group --groups adm,sudo "$DEFAULT_USER"
-    echo "$DEFAULT_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-    echo "$DEFAULT_USER:$DEFAULT_PASSWORD" | /usr/sbin/chpasswd 2>/dev/null || true
-    # Copy root's dotfiles as starting point
-    cp -r /root/{.config,.gtkrc-2.0,.asoundrc} "$HOME_DIR" 2>/dev/null || true
+# Create User
+USER=${USER:-root}
+HOME=/root
+if [ "$USER" != "root" ]; then
+    echo "* enable custom user: $USER"
+    useradd --create-home --shell /bin/bash --user-group --groups adm,sudo "$USER"
+    echo "$USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    if [ -z "$PASSWORD" ]; then
+        echo "  set default password to \"ubuntu\""
+        PASSWORD=ubuntu
+    fi
+    HOME="/home/$USER"
+    echo "$USER:$PASSWORD" | /usr/sbin/chpasswd 2> /dev/null || echo ""
+    cp -r /root/{.config,.gtkrc-2.0,.asoundrc} "$HOME" 2>/dev/null
+    mkdir $HOME/catkin_ws
+    chown -R "$USER:$USER" "$HOME"
     [ -d "/dev/snd" ] && chgrp -R adm /dev/snd
 fi
 
-# Ensure HOME is set
-export HOME="$HOME_DIR"
+# 桌面显示层:Xvfb + xfce4 + RustDesk,由 supervisor 管理
+mkdir -p "$HOME/.config/rustdesk"
+cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk2.toml"
+rendezvous_server = '192.168.9.234:21116'
+verification-method = 'use-permanent-password'
+relay-server = '192.168.9.234'
+EOF
+cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk.toml"
+password = '01AWTA3qfH12dh+Jop4jhLowpGj4u3z6wXlUyJ7DNcEnRTU9yHieI6ApL6TJ3ma5zVuJmVSXmO3G7JZuUosQoJ7VCcw+jDbwpbZUrwK62+zG/MAPn1sR8t'
+salt = 'zbm65tcbn5w4e4vyftzex7bt6w38aewd'
+EOF
+chown -R "$USER:$USER" "$HOME/.config/rustdesk"
 
-# --- VNC password setup ------------------------------------------------------
-echo "* Configuring VNC password..."
-mkdir -p "$HOME/.vnc"
-echo "$DEFAULT_PASSWORD" | vncpasswd -f > "$HOME/.vnc/passwd"
-chmod 600 "$HOME/.vnc/passwd"
-
-# --- Xfce wallpaper configuration (Ubuntu 20.04 default) --------------------
-# The default Ubuntu Focal wallpaper is /usr/share/backgrounds/warty-final-ubuntu.png
-# or /usr/share/backgrounds/fossa-default.jpg if ubuntu-wallpapers is installed.
-WALLPAPER=""
-if [ -f /usr/share/backgrounds/ubuntu-focal/ubuntu-focal.png ]; then
-    WALLPAPER="/usr/share/backgrounds/ubuntu-focal/ubuntu-focal.png"
-elif [ -f /usr/share/backgrounds/warty-final-ubuntu.png ]; then
-    WALLPAPER="/usr/share/backgrounds/warty-final-ubuntu.png"
-elif [ -f /usr/share/backgrounds/fossa-default.jpg ]; then
-    WALLPAPER="/usr/share/backgrounds/fossa-default.jpg"
-else
-    WALLPAPER="/usr/share/backgrounds/xfce/xfce-blue.jpg"
-fi
-echo "* Using wallpaper: $WALLPAPER"
-
-# Write xfce4-desktop.xml to set wallpaper via xfconf channel
-mkdir -p "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-cat << XFCE_DESKTOP_EOF > "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-desktop" version="1.0">
-  <property name="desktop-icons" type="empty">
-    <property name="style" type="int" value="0"/>
-    <property name="icon-size" type="int" value="48"/>
-    <property name="show-icon-text" type="bool" value="true"/>
-    <property name="show-mounted" type="bool" value="true"/>
-    <property name="show-trash" type="bool" value="false"/>
-    <property name="show-home" type="bool" value="false"/>
-    <property name="filesystem" type="empty">
-      <property name="show-removable" type="bool" value="false"/>
-    </property>
-  </property>
-  <property name="backdrop" type="empty">
-    <property name="screen0" type="empty">
-      <property name="monitor0" type="empty">
-        <property name="workspace0" type="empty">
-          <property name="last-image" type="string" value="$WALLPAPER"/>
-          <property name="image-style" type="int" value="5"/>
-          <property name="color-style" type="int" value="0"/>
-          <property name="primary-color" type="string" value="#000000"/>
-          <property name="secondary-color" type="string" value="#000000"/>
-        </property>
-      </property>
-    </property>
-  </property>
-  <property name="windowing" type="empty">
-    <property name="show-wm-menu" type="bool" value="true"/>
-  </property>
-</channel>
-XFCE_DESKTOP_EOF
-
-# Also set fallback wallpaper in case xfconf doesn't load early
-# Xfce expects filenames like icons.screen0-1280x720.rc (keep the 'x')
-mkdir -p "$HOME/.config/xfce4/desktop"
-cat << XFCE_ICONS_EOF > "$HOME/.config/xfce4/desktop/icons.screen0-${VNC_GEOMETRY}.rc"
-[xfce-desktop]
-last-image=$WALLPAPER
-image-style=5
-color-style=0
-primary-color=#000000
-secondary-color=#000000
-show-icon-text=true
-icon-size=48
-show-mounted=true
-show-trash=false
-show-home=false
-XFCE_ICONS_EOF
-
-# --- Desktop shortcuts: only ONE application launcher card -------------------
-echo "* Creating desktop shortcuts (Terminator only)..."
-mkdir -p "$HOME/Desktop"
-
-# Remove any existing .desktop files we don't want
-rm -f "$HOME/Desktop/"*.desktop 2>/dev/null || true
-
-# Keep ONLY Terminator as the single launcher card
-cat << TERMINATOR_DESKTOP_EOF > "$HOME/Desktop/terminator.desktop"
-[Desktop Entry]
-Version=1.0
-Name=Terminator
-Comment=Multiple terminals in one window
-TryExec=terminator
-Exec=terminator
-Icon=utilities-terminal
-Type=Application
-Categories=GNOME;GTK;Utility;TerminalEmulator;
-StartupNotify=true
-Keywords=terminal;shell;prompt;command;commandline;
-TERMINATOR_DESKTOP_EOF
-
-chmod +x "$HOME/Desktop/terminator.desktop"
-
-# --- catkin_ws workspace initialization -------------------------------------
-echo "* Initializing catkin_ws workspace..."
-mkdir -p "$HOME/catkin_ws/src"
-
-# --- ROS environment setup in .bashrc ---------------------------------------
-echo "* Configuring ROS environment..."
-BASHRC="$HOME/.bashrc"
-touch "$BASHRC"
-
-grep -F "source /opt/ros/$ROS_DISTRO/setup.bash" "$BASHRC" || \
-    echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> "$BASHRC"
-
-grep -F "source \$HOME/catkin_ws/devel/setup.bash" "$BASHRC" || \
-    echo "[ -f \$HOME/catkin_ws/devel/setup.bash ] && source \$HOME/catkin_ws/devel/setup.bash" >> "$BASHRC"
-
-grep -F "export ROS_AUTOMATIC_DISCOVERY_RANGE=" "$BASHRC" || \
-    echo "# export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST" >> "$BASHRC"
-
-# --- xstartup for VNC session ------------------------------------------------
-echo "* Writing xstartup..."
-XSTARTUP="$HOME/.vnc/xstartup"
-cat << XSTARTUP_EOF > "$XSTARTUP"
-#!/bin/sh
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-export LANG=C.UTF-8
-export LC_ALL=C.UTF-8
-exec startxfce4
-XSTARTUP_EOF
-chmod 755 "$XSTARTUP"
-
-# --- VNC server launch script -----------------------------------------------
-echo "* Writing VNC launch script (geometry=${VNC_GEOMETRY}, depth=${VNC_DEPTH})..."
-VNCRUN="$HOME/.vnc/vnc_run.sh"
-cat << VNCRUN_EOF > "$VNCRUN"
-#!/bin/bash
-# Clean up stale VNC lock files
-rm -f /tmp/.X*-lock 2>/dev/null || true
-rm -rf /tmp/.X11-unix/X* 2>/dev/null || true
-rm -rf /tmp/.X11-unix 2>/dev/null || true
-
-# Stop any existing VNC on :1
-vncserver -kill :1 2>/dev/null || true
-sleep 1
-
-# Start VNC server (-localhost no: bind 0.0.0.0 so Docker port map works)
-# TigerVNC 1.10.0 (Ubuntu 20.04 focal) uses '-localhost no' not '-no-localhost'
-if [ "\$(uname -m)" = "aarch64" ]; then
-    LD_PRELOAD=/lib/aarch64-linux-gnu/libgcc_s.so.1 \
-        vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH} -localhost no
-else
-    vncserver :1 -fg -geometry ${VNC_GEOMETRY} -depth ${VNC_DEPTH} -localhost no
-fi
-VNCRUN_EOF
-chmod +x "$VNCRUN"
-
-# --- noVNC launch script -----------------------------------------------------
-# Port 8080 is used instead of 80 because non-root users can't bind to port 80
-NOVNC_RUN="$HOME/.vnc/novnc_run.sh"
-cat << NOVNC_EOF > "$NOVNC_RUN"
-#!/bin/bash
-# Wait briefly for VNC to be ready
-sleep 2
-exec websockify --web=/usr/lib/novnc 8080 localhost:5901
-NOVNC_EOF
-chmod +x "$NOVNC_RUN"
-
-# --- Supervisor configuration ------------------------------------------------
-echo "* Configuring supervisord..."
-CONF="/etc/supervisor/conf.d/supervisord.conf"
-cat << SUPERVISOR_EOF > "$CONF"
+CONF_PATH=/etc/supervisor/conf.d/supervisord.conf
+cat << EOF > $CONF_PATH
 [supervisord]
 nodaemon=true
 user=root
-logfile=/dev/null
-pidfile=/tmp/supervisord.pid
 
-[program:vnc]
-command=gosu ${DEFAULT_USER} bash ${VNCRUN}
+[program:xvfb]
+command=Xvfb :0 -screen 0 1920x1080x24 -ac +extension RANDR +extension RENDER
 autorestart=true
-restartsecs=3
-stopsignal=TERM
-stopasgroup=true
-killasgroup=true
+priority=10
 
-[program:novnc]
-command=gosu ${DEFAULT_USER} bash ${NOVNC_RUN}
+[program:xfce]
+command=gosu '$USER' bash -c 'sleep 3; export DISPLAY=:0 HOME=$HOME; startxfce4'
 autorestart=true
-restartsecs=3
-SUPERVISOR_EOF
+priority=20
 
-# --- Fix rosdep permissions --------------------------------------------------
-echo "* Fixing rosdep permissions..."
+[program:rustdesk]
+command=gosu '$USER' bash -c 'sleep 8; export DISPLAY=:0 HOME=$HOME; /usr/lib/rustdesk/rustdesk --server --no-tray'
+autorestart=true
+priority=30
+EOF
+
+# colcon
+BASHRC_PATH="$HOME/.bashrc"
+grep -F "source /opt/ros/$ROS_DISTRO/setup.bash" "$BASHRC_PATH" || echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> "$BASHRC_PATH"
+grep -F "export ROS_AUTOMATIC_DISCOVERY_RANGE=" "$BASHRC_PATH" || echo "# export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST" >> "$BASHRC_PATH"
+chown "$USER:$USER" "$BASHRC_PATH"
+
+# Fix rosdep permission
 mkdir -p "$HOME/.ros"
-if [ -d /root/.ros/rosdep ]; then
-    cp -r /root/.ros/rosdep "$HOME/.ros/rosdep" 2>/dev/null || true
-fi
-
-# --- Terminator profile config ----------------------------------------------
-mkdir -p "$HOME/.config/terminator"
-cat << TERMINATOR_CFG_EOF > "$HOME/.config/terminator/config"
+cp -r /root/.ros/rosdep "$HOME/.ros/rosdep"
+chown -R "$USER:$USER" "$HOME/.ros"
+#profile termiator
+mkdir -p "$HOME/Desktop/.config/terminator"
+cat << EOF > "$HOME/Desktop/.config/terminator/config"
 [global_config]
+[keybindings]
 [profiles]
   [[default]]
-    background_color = "#1e1e1e"
-    foreground_color = "#ffffff"
-    palette = "#2d2d2d:#f27779:#b3de81:#eedc82:#83a598:#faacd3:#86c1b9:#eeeeec:#535353:#f27779:#b3de81:#eedc82:#83a598:#faacd3:#86c1b9:#ffffff"
-    font = "DejaVu Sans Mono 11"
-    use_system_font = False
+    background_color = "#ffffff"
+    cursor_color = "#aaaaaa"
+    foreground_color = "#000000"
 [layouts]
   [[default]]
     [[[window0]]]
       type = Window
       parent = ""
-TERMINATOR_CFG_EOF
+    [[[child1]]]
+      type = Terminal
+      parent = window0
+[plugins]
+EOF
+# Add terminator shortcut
+mkdir -p "$HOME/Desktop"
+cat << EOF > "$HOME/Desktop/terminator.desktop"
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=Terminator
+Comment=Multiple terminals in one window
+TryExec=terminator
+Exec=terminator
+Icon=terminator
+Type=Application
+Categories=GNOME;GTK;Utility;TerminalEmulator;System;
+StartupNotify=true
+X-Ubuntu-Gettext-Domain=terminator
+X-Ayatana-Desktop-Shortcuts=NewWindow;
+Keywords=terminal;shell;prompt;command;commandline;
+[NewWindow Shortcut Group]
+Name=Open a New Window
+Exec=terminator
+TargetEnvironment=Unity
+EOF
+cat << EOF > "$HOME/Desktop/firefox.desktop"
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Name=Firefox Web Browser
+Name[ar]=متصفح الويب فَيَرفُكْس
+Name[ast]=Restolador web Firefox
+Name[bn]=ফায়ারফক্স ওয়েব ব্রাউজার
+Name[ca]=Navegador web Firefox
+Name[cs]=Firefox Webový prohlížeč
+Name[da]=Firefox - internetbrowser
+Name[el]=Περιηγητής Firefox
+Name[es]=Navegador web Firefox
+Name[et]=Firefoxi veebibrauser
+Name[fa]=مرورگر اینترنتی Firefox
+Name[fi]=Firefox-selain
+Name[fr]=Navigateur Web Firefox
+Name[gl]=Navegador web Firefox
+Name[he]=דפדפן האינטרנט Firefox
+Name[hr]=Firefox web preglednik
+Name[hu]=Firefox webböngésző
+Name[it]=Firefox Browser Web
+Name[ja]=Firefox ウェブ・ブラウザ
+Name[ko]=Firefox 웹 브라우저
+Name[ku]=Geroka torê Firefox
+Name[lt]=Firefox interneto naršyklė
+Name[nb]=Firefox Nettleser
+Name[nl]=Firefox webbrowser
+Name[nn]=Firefox Nettlesar
+Name[no]=Firefox Nettleser
+Name[pl]=Przeglądarka WWW Firefox
+Name[pt]=Firefox Navegador Web
+Name[pt_BR]=Navegador Web Firefox
+Name[ro]=Firefox – Navigator Internet
+Name[ru]=Веб-браузер Firefox
+Name[sk]=Firefox - internetový prehliadač
+Name[sl]=Firefox spletni brskalnik
+Name[sv]=Firefox webbläsare
+Name[tr]=Firefox Web Tarayıcısı
+Name[ug]=Firefox توركۆرگۈ
+Name[uk]=Веб-браузер Firefox
+Name[vi]=Trình duyệt web Firefox
+Name[zh_CN]=Firefox 网络浏览器
+Name[zh_TW]=Firefox 網路瀏覽器
+Comment=Browse the World Wide Web
+Comment[ar]=تصفح الشبكة العنكبوتية العالمية
+Comment[ast]=Restola pela Rede
+Comment[bn]=ইন্টারনেট ব্রাউজ করুন
+Comment[ca]=Navegueu per la web
+Comment[cs]=Prohlížení stránek World Wide Webu
+Comment[da]=Surf på internettet
+Comment[de]=Im Internet surfen
+Comment[el]=Μπορείτε να περιηγηθείτε στο διαδίκτυο (Web)
+Comment[es]=Navegue por la web
+Comment[et]=Lehitse veebi
+Comment[fa]=صفحات شبکه جهانی اینترنت را مرور نمایید
+Comment[fi]=Selaa Internetin WWW-sivuja
+Comment[fr]=Naviguer sur le Web
+Comment[gl]=Navegar pola rede
+Comment[he]=גלישה ברחבי האינטרנט
+Comment[hr]=Pretražite web
+Comment[hu]=A világháló böngészése
+Comment[it]=Esplora il web
+Comment[ja]=ウェブを閲覧します
+Comment[ko]=웹을 돌아 다닙니다
+Comment[ku]=Li torê bigere
+Comment[lt]=Naršykite internete
+Comment[nb]=Surf på nettet
+Comment[nl]=Verken het internet
+Comment[nn]=Surf på nettet
+Comment[no]=Surf på nettet
+Comment[pl]=Przeglądanie stron WWW
+Comment[pt]=Navegue na Internet
+Comment[pt_BR]=Navegue na Internet
+Comment[ro]=Navigați pe Internet
+Comment[ru]=Доступ в Интернет
+Comment[sk]=Prehliadanie internetu
+Comment[sl]=Brskajte po spletu
+Comment[sv]=Surfa på webben
+Comment[tr]=İnternet'te Gezinin
+Comment[ug]=دۇنيادىكى توربەتلەرنى كۆرگىلى بولىدۇ
+Comment[uk]=Перегляд сторінок Інтернету
+Comment[vi]=Để duyệt các trang web
+Comment[zh_CN]=浏览互联网
+Comment[zh_TW]=瀏覽網際網路
+GenericName=Web Browser
+GenericName[ar]=متصفح ويب
+GenericName[ast]=Restolador Web
+GenericName[bn]=ওয়েব ব্রাউজার
+GenericName[ca]=Navegador web
+GenericName[cs]=Webový prohlížeč
+GenericName[da]=Webbrowser
+GenericName[el]=Περιηγητής διαδικτύου
+GenericName[es]=Navegador web
+GenericName[et]=Veebibrauser
+GenericName[fa]=مرورگر اینترنتی
+GenericName[fi]=WWW-selain
+GenericName[fr]=Navigateur Web
+GenericName[gl]=Navegador Web
+GenericName[he]=דפדפן אינטרנט
+GenericName[hr]=Web preglednik
+GenericName[hu]=Webböngésző
+GenericName[it]=Browser web
+GenericName[ja]=ウェブ・ブラウザ
+GenericName[ko]=웹 브라우저
+GenericName[ku]=Geroka torê
+GenericName[lt]=Interneto naršyklė
+GenericName[nb]=Nettleser
+GenericName[nl]=Webbrowser
+GenericName[nn]=Nettlesar
+GenericName[no]=Nettleser
+GenericName[pl]=Przeglądarka WWW
+GenericName[pt]=Navegador Web
+GenericName[pt_BR]=Navegador Web
+GenericName[ro]=Navigator Internet
+GenericName[ru]=Веб-браузер
+GenericName[sk]=Internetový prehliadač
+GenericName[sl]=Spletni brskalnik
+GenericName[sv]=Webbläsare
+GenericName[tr]=Web Tarayıcı
+GenericName[ug]=توركۆرگۈ
+GenericName[uk]=Веб-браузер
+GenericName[vi]=Trình duyệt Web
+GenericName[zh_CN]=网络浏览器
+GenericName[zh_TW]=網路瀏覽器
+Keywords=Internet;WWW;Browser;Web;Explorer
+Keywords[ar]=انترنت;إنترنت;متصفح;ويب;وب
+Keywords[ast]=Internet;WWW;Restolador;Web;Esplorador
+Keywords[ca]=Internet;WWW;Navegador;Web;Explorador;Explorer
+Keywords[cs]=Internet;WWW;Prohlížeč;Web;Explorer
+Keywords[da]=Internet;Internettet;WWW;Browser;Browse;Web;Surf;Nettet
+Keywords[de]=Internet;WWW;Browser;Web;Explorer;Webseite;Site;surfen;online;browsen
+Keywords[el]=Internet;WWW;Browser;Web;Explorer;Διαδίκτυο;Περιηγητής;Firefox;Φιρεφοχ;Ιντερνετ
+Keywords[es]=Explorador;Internet;WWW
+Keywords[fi]=Internet;WWW;Browser;Web;Explorer;selain;Internet-selain;internetselain;verkkoselain;netti;surffaa
+Keywords[fr]=Internet;WWW;Browser;Web;Explorer;Fureteur;Surfer;Navigateur
+Keywords[he]=דפדפן;אינטרנט;רשת;אתרים;אתר;פיירפוקס;מוזילה;
+Keywords[hr]=Internet;WWW;preglednik;Web
+Keywords[hu]=Internet;WWW;Böngésző;Web;Háló;Net;Explorer
+Keywords[it]=Internet;WWW;Browser;Web;Navigatore
+Keywords[is]=Internet;WWW;Vafri;Vefur;Netvafri;Flakk
+Keywords[ja]=Internet;WWW;Web;インターネット;ブラウザ;ウェブ;エクスプローラ
+Keywords[nb]=Internett;WWW;Nettleser;Explorer;Web;Browser;Nettside
+Keywords[nl]=Internet;WWW;Browser;Web;Explorer;Verkenner;Website;Surfen;Online
+Keywords[pt]=Internet;WWW;Browser;Web;Explorador;Navegador
+Keywords[pt_BR]=Internet;WWW;Browser;Web;Explorador;Navegador
+Keywords[ru]=Internet;WWW;Browser;Web;Explorer;интернет;браузер;веб;файрфокс;огнелис
+Keywords[sk]=Internet;WWW;Prehliadač;Web;Explorer
+Keywords[sl]=Internet;WWW;Browser;Web;Explorer;Brskalnik;Splet
+Keywords[tr]=İnternet;WWW;Tarayıcı;Web;Gezgin;Web sitesi;Site;sörf;çevrimiçi;tara
+Keywords[uk]=Internet;WWW;Browser;Web;Explorer;Інтернет;мережа;переглядач;оглядач;браузер;веб;файрфокс;вогнелис;перегляд
+Keywords[vi]=Internet;WWW;Browser;Web;Explorer;Trình duyệt;Trang web
+Keywords[zh_CN]=Internet;WWW;Browser;Web;Explorer;网页;浏览;上网;火狐;Firefox;ff;互联网;网站;
+Keywords[zh_TW]=Internet;WWW;Browser;Web;Explorer;網際網路;網路;瀏覽器;上網;網頁;火狐
+Exec=firefox %u
+Terminal=false
+X-MultipleArgs=false
+Type=Application
+Icon=firefox
+Categories=GNOME;GTK;Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/rss+xml;application/rdf+xml;image/gif;image/jpeg;image/png;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/ftp;x-scheme-handler/chrome;video/webm;application/x-xpinstall;
+StartupNotify=true
+Actions=new-window;new-private-window;
 
-# --- Apply correct ownership -------------------------------------------------
-echo "* Setting ownership for $DEFAULT_USER..."
-chown -R "$DEFAULT_USER:$DEFAULT_USER" "$HOME" 2>/dev/null || true
-[ -d "/dev/snd" ] && chgrp -R adm /dev/snd 2>/dev/null || true
+[Desktop Action new-window]
+Name=Open a New Window
+Name[ar]=افتح نافذة جديدة
+Name[ast]=Abrir una ventana nueva
+Name[bn]=Abrir una ventana nueva
+Name[ca]=Obre una finestra nova
+Name[cs]=Otevřít nové okno
+Name[da]=Åbn et nyt vindue
+Name[de]=Ein neues Fenster öffnen
+Name[el]=Νέο παράθυρο
+Name[es]=Abrir una ventana nueva
+Name[fi]=Avaa uusi ikkuna
+Name[fr]=Ouvrir une nouvelle fenêtre
+Name[gl]=Abrir unha nova xanela
+Name[he]=פתיחת חלון חדש
+Name[hr]=Otvori novi prozor
+Name[hu]=Új ablak nyitása
+Name[it]=Apri una nuova finestra
+Name[ja]=新しいウィンドウを開く
+Name[ko]=새 창 열기
+Name[ku]=Paceyeke nû veke
+Name[lt]=Atverti naują langą
+Name[nb]=Åpne et nytt vindu
+Name[nl]=Nieuw venster openen
+Name[pt]=Abrir nova janela
+Name[pt_BR]=Abrir nova janela
+Name[ro]=Deschide o fereastră nouă
+Name[ru]=Новое окно
+Name[sk]=Otvoriť nové okno
+Name[sl]=Odpri novo okno
+Name[sv]=Öppna ett nytt fönster
+Name[tr]=Yeni pencere aç
+Name[ug]=يېڭى كۆزنەك ئېچىش
+Name[uk]=Відкрити нове вікно
+Name[vi]=Mở cửa sổ mới
+Name[zh_CN]=新建窗口
+Name[zh_TW]=開啟新視窗
+Exec=firefox -new-window
 
-# --- Clear secrets -----------------------------------------------------------
-# (Print summary BEFORE clearing the password variable)
-echo ""
-echo "====================================================================="
-echo "  ROS Noetic + Xfce + VNC container ready!"
-echo "  VNC port:  5901  (connect with AVNC using container IP)"
-echo "  noVNC URL: http://<container-ip>:8080/"
-echo "  Username:  $DEFAULT_USER"
-echo "  Password:  $DEFAULT_PASSWORD"
-echo "  Geometry:  ${VNC_GEOMETRY} (override with VNC_GEOMETRY env)"
-echo "====================================================================="
-echo ""
+[Desktop Action new-private-window]
+Name=Open a New Private Window
+Name[ar]=افتح نافذة جديدة للتصفح الخاص
+Name[ca]=Obre una finestra nova en mode d'incògnit
+Name[cs]=Otevřít nové anonymní okno
+Name[de]=Ein neues privates Fenster öffnen
+Name[el]=Νέο ιδιωτικό παράθυρο
+Name[es]=Abrir una ventana privada nueva
+Name[fi]=Avaa uusi yksityinen ikkuna
+Name[fr]=Ouvrir une nouvelle fenêtre de navigation privée
+Name[he]=פתיחת חלון גלישה פרטית חדש
+Name[hu]=Új privát ablak nyitása
+Name[it]=Apri una nuova finestra anonima
+Name[nb]=Åpne et nytt privat vindu
+Name[ru]=Новое приватное окно
+Name[sl]=Odpri novo okno zasebnega brskanja
+Name[sv]=Öppna ett nytt privat fönster
+Name[tr]=Yeni gizli pencere aç
+Name[uk]=Відкрити нове вікно у потайливому режимі
+Name[zh_TW]=開啟新隱私瀏覽視窗
+Exec=firefox -private-window
+EOF
+chown -R "$USER:$USER" "$HOME/Desktop"
+chmod +x "$HOME/Desktop/*.desktop"
 
-PASSWORD=""
-DEFAULT_PASSWORD=""
+# clearup
+PASSWORD=
+VNC_PASSWORD=
 
-# --- Launch supervisord (fix: single exec, removed the dangling second exec) -
+echo "============================================================================================"
+echo "NOTE: Before stopping to commit docker container to new docker image, log out first."
+echo -e 'See \e]8;;https://github.com/Tiryoh/docker-ros2-desktop-vnc/issue/131\e\\https://github.com/Tiryoh/docker-ros2-desktop-vnc/issue/131\e]8;;\e\\'
+echo "============================================================================================"
+
 exec /bin/tini -- supervisord -n -c /etc/supervisor/supervisord.conf
+exec gosu $USER "$@"
