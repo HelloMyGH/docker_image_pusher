@@ -121,6 +121,13 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
 RUN rm /etc/apt/apt.conf.d/docker-clean
 
 # RustDesk 被控端(无 GUI,只做 server)
+# 运行时依赖:libxdo3 缺失时 enigo 的鼠标/键盘注入会静默失效(no-op)
+RUN apt-get update -q && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libxdo3 libxtst6 xdotool x11-apps && \
+    apt-get autoclean && \
+    apt-get autoremove && \
+    rm -rf /var/lib/apt/lists/*
 COPY rustdesk-headless/rustdesk /usr/lib/rustdesk/rustdesk
 RUN chmod 755 /usr/lib/rustdesk/rustdesk
 
