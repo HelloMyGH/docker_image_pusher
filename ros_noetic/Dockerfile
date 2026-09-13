@@ -28,22 +28,11 @@ RUN apt-get update -q && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
-# Install locale
-ENV LANG=C.UTF-8
-ENV LANGUAGE=zh_CN:zh
-ENV LC_ALL=C.UTF-8
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  locales language-pack-zh-hans language-pack-gnome-zh-hans fonts-wqy-microhei  fonts-wqy-zenhei desktop-file-utils && \
-  locale-gen zh_CN.UTF-8 && \
-  update-locale LANG=zh_CN.UTF-8 LANGUAGE=zh_CN:zh LC_ALL=zh_CN.UTF-8 && \
-  update-desktop-database && \
-  apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
-  
-# Install Ubuntu xfce4 desktop
+
+# Install Ubuntu Mate desktop
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        xubuntu-desktop && \
+        ubuntu-mate-desktop && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
@@ -51,20 +40,22 @@ RUN apt-get update -q && \
 # Add Package
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        tigervnc-standalone-server tigervnc-common \
         supervisor wget curl gosu git sudo python3-pip tini \
         build-essential vim sudo lsb-release locales \
-        bash-completion tzdata terminator gedit \
-        xvfb && \
+        bash-completion tzdata terminator && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
-# remove liboffice
-RUN apt-get update && \
-    apt-get purge -y "libreoffice*" && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-    
+
+# noVNC and Websockify
+RUN git clone https://github.com/AtsushiSaito/noVNC.git -b add_clipboard_support /usr/lib/novnc
+RUN pip install --no-cache-dir git+https://github.com/novnc/websockify.git@v0.10.0
+RUN ln -s /usr/lib/novnc/vnc.html /usr/lib/novnc/index.html
+
+# Set remote resize function enabled by default
+RUN sed -i "s/UI.initSetting('resize', 'off');/UI.initSetting('resize', 'remote');/g" /usr/lib/novnc/app/ui.js
+
 # Disable auto update and crash report
 RUN sed -i 's/Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
 RUN sed -i 's/enabled=1/enabled=0/g' /etc/default/apport
@@ -77,6 +68,17 @@ RUN DEBIAN_FRONTEND=noninteractive add-apt-repository ppa:mozillateam/ppa -y && 
     apt-get update -q && \
     apt-get install -y --allow-downgrades \
     firefox && \
+    apt-get autoclean && \
+    apt-get autoremove && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install VSCodium
+RUN wget https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg \
+    -O /usr/share/keyrings/vscodium-archive-keyring.asc && \
+    echo 'deb [ signed-by=/usr/share/keyrings/vscodium-archive-keyring.asc ] https://paulcarroty.gitlab.io/vscodium-deb-rpm-repo/debs vscodium main' \
+    | tee /etc/apt/sources.list.d/vscodium.list && \
+    apt-get update -q && \
+    apt-get install -y codium && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
@@ -103,36 +105,40 @@ RUN apt-get update -q && \
     rm -rf /var/lib/apt/lists/*
 
 RUN rosdep update
+
 # Gazebo packages for arm64 are not maintained.
 # http://repositories.ros.org/status_page/ros_noetic_dbv8.html?q=ign
 RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
     apt-get update -q && \
     apt-get install -y \
     ros-${ROS_DISTRO}-gazebo-ros-pkgs \
-    ros-${ROS_DISTRO}-ros-ign-gazebo \
-    ros-noetic-arbotix ros-noetic-gazebo-ros-control \
-    ros-noetic-gmapping ros-noetic-map-server \
-    ros-noetic-amcl ros-noetic-move-base \
-    ros-noetic-navigation ros-noetic-teleop-twist-keyboard && \
+    ros-${ROS_DISTRO}-ros-ign-gazebo && \
     rm -rf /var/lib/apt/lists/*; \
     fi
 
 # Enable apt-get completion after running `apt-get update` in the container
 RUN rm /etc/apt/apt.conf.d/docker-clean
 
-# RustDesk 被控端(无 GUI,只做 server)
-# 运行时依赖:libxdo3 缺失时 enigo 的鼠标/键盘注入会静默失效(no-op)
+# RustDesk 受控端运行时依赖(libxdo3 缺失时 enigo 鼠标/键盘注入会静默失效)
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libxdo3 libxtst6 xdotool x11-apps && \
+        libxdo3 libxtst6 xdotool x11-utils x11-xserver-utils && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
-COPY rustdesk-headless/rustdesk /usr/lib/rustdesk/rustdesk
+
+# RustDesk 受控端二进制(放 /usr/lib/rustdesk 以满足 is_installed() 检查)
+COPY ./rustdesk-headless/rustdesk /usr/lib/rustdesk/rustdesk
 RUN chmod 755 /usr/lib/rustdesk/rustdesk
 
-COPY ./entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh
+# RustDesk 环境变量: RD_ID 自定义设备 ID(留空则用自动生成 ID), 密码固定 1234
+ENV RD_ID="" \
+    RD_SERVER=192.168.9.234 \
+    RD_RELAY=192.168.9.234 \
+    RD_PASSWORD=1234 \
+    RD_DISPLAY=:1
+
+COPY ./entrypoint.sh /
 ENTRYPOINT [ "/bin/bash", "-c", "/entrypoint.sh" ]
 
 ENV USER ubuntu

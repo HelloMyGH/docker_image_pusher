@@ -14,56 +14,127 @@ if [ "$USER" != "root" ]; then
     HOME="/home/$USER"
     echo "$USER:$PASSWORD" | /usr/sbin/chpasswd 2> /dev/null || echo ""
     cp -r /root/{.config,.gtkrc-2.0,.asoundrc} "$HOME" 2>/dev/null
-    mkdir $HOME/catkin_ws
     chown -R "$USER:$USER" "$HOME"
     [ -d "/dev/snd" ] && chgrp -R adm /dev/snd
 fi
 
-# 桌面显示层:Xvfb + xfce4 + RustDesk,由 supervisor 管理
+# RustDesk 受控端配置(环境变量设置 ID, 密码固定, 服务器/中继 192.168.9.234)
+RD_ID=${RD_ID:-}
+RD_SERVER=${RD_SERVER:-192.168.9.234}
+RD_RELAY=${RD_RELAY:-192.168.9.234}
+RD_PASSWORD=${RD_PASSWORD:-1234}
+RD_DISPLAY=${RD_DISPLAY:-:1}   # 与 vncserver :1 保持一致
+
 mkdir -p "$HOME/.config/rustdesk"
-cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk2.toml"
+# RustDesk2.toml: 服务器/中继地址 + 固定密码策略
+cat << EOF > "$HOME/.config/rustdesk/RustDesk2.toml"
 [options]
-custom-rendezvous-server = '192.168.9.234'
-relay-server = '192.168.9.234'
+custom-rendezvous-server = '$RD_SERVER'
+relay-server = '$RD_RELAY'
 verification-method = 'use-permanent-password'
 EOF
-cat << 'EOF' > "$HOME/.config/rustdesk/RustDesk.toml"
-password = '01AWTA3qfH12dh+Jop4jhLowpGj4u3z6wXlUyJ7DNcEnRTU9yHieI6ApL6TJ3ma5zVuJmVSXmO3G7JZuUosQoJ7VCcw+jDbwpbZUrwK62+zG/MAPn1sR8t'
-salt = 'zbm65tcbn5w4e4vyftzex7bt6w38aewd'
+# RustDesk.toml: 通过 id 字段注入自定义登录 ID(RD_ID 留空则由 RustDesk 自动生成)
+# 格式需满足 RustDesk 要求: 字母开头, 6-16 位字母/数字/下划线/连字符
+if [ -n "$RD_ID" ] && [[ ! "$RD_ID" =~ ^[a-zA-Z][a-zA-Z0-9_-]{5,15}$ ]]; then
+    echo "WARN: RD_ID '$RD_ID' 格式无效, 回退为自动生成 ID"
+    RD_ID=""
+fi
+cat << EOF > "$HOME/.config/rustdesk/RustDesk.toml"
+enc_id = ''
+id = '$RD_ID'
+password = ''
+salt = ''
+key_pair = [ [], [] ]
+key_confirmed = false
+[keys_confirmed]
 EOF
 chown -R "$USER:$USER" "$HOME/.config/rustdesk"
 
+# RustDesk 受控端启动脚本(以 root 运行以便通过 --password 设置固定密码,
+# HOME 指向用户目录以读取正确配置)
+RUSTDESK_RUN=/usr/local/bin/rustdesk_run.sh
+cat << 'EOF' > $RUSTDESK_RUN
+#!/bin/bash
+export HOME="$RD_HOME"
+export DISPLAY="$RD_DISPLAY"
+# 等待 X server(noVNC 的 vncserver :1)就绪
+for i in $(seq 1 60); do
+    [ -e "/tmp/.X11-unix/X${RD_DISPLAY#:}" ] && break
+    sleep 1
+done
+# 允许 root 访问 X server(noVNC 的 MATE 会话)
+xhost +local: >/dev/null 2>&1
+/usr/lib/rustdesk/rustdesk --server --no-tray &
+SERVER_PID=$!
+# 等待 IPC socket 就绪后设置固定密码
+sleep 5
+for i in $(seq 1 20); do
+    [ -S "/tmp/RustDesk-0/ipc" ] && break
+    sleep 1
+done
+/usr/lib/rustdesk/rustdesk --password "$RD_PASSWORD" >/dev/null 2>&1
+wait "$SERVER_PID"
+EOF
+chmod 755 $RUSTDESK_RUN
+
+# VNC password
+VNC_PASSWORD=${PASSWORD:-ubuntu}
+
+mkdir -p "$HOME/.vnc"
+echo "$VNC_PASSWORD" | vncpasswd -f > "$HOME/.vnc/passwd"
+chmod 600 "$HOME/.vnc/passwd"
+chown -R "$USER:$USER" "$HOME"
+sed -i "s/password = WebUtil.getConfigVar('password');/password = '$VNC_PASSWORD'/" /usr/lib/novnc/app/ui.js
+
+# xstartup
+XSTARTUP_PATH="$HOME/.vnc/xstartup"
+cat << EOF > "$XSTARTUP_PATH"
+#!/bin/sh
+unset DBUS_SESSION_BUS_ADDRESS
+mate-session
+EOF
+chown "$USER:$USER" "$XSTARTUP_PATH"
+chmod 755 "$XSTARTUP_PATH"
+
+# vncserver launch
+VNCRUN_PATH="$HOME/.vnc/vnc_run.sh"
+cat << EOF > "$VNCRUN_PATH"
+#!/bin/sh
+
+# Workaround for issue when image is created with "docker commit".
+# Thanks to @SaadRana17
+# https://github.com/Tiryoh/docker-ros2-desktop-vnc/issues/131#issuecomment-2184156856
+
+if [ -e /tmp/.X1-lock ]; then
+    rm -f /tmp/.X1-lock
+fi
+if [ -e /tmp/.X11-unix/X1 ]; then
+    rm -f /tmp/.X11-unix/X1
+fi
+
+if [ $(uname -m) = "aarch64" ]; then
+    LD_PRELOAD=/lib/aarch64-linux-gnu/libgcc_s.so.1 vncserver :1 -fg -geometry 1920x1080 -depth 24
+else
+    vncserver :1 -fg -geometry 1920x1080 -depth 24
+fi
+EOF
+
+# Supervisor
 CONF_PATH=/etc/supervisor/conf.d/supervisord.conf
 cat << EOF > $CONF_PATH
 [supervisord]
 nodaemon=true
 user=root
-
-[program:xvfb]
-command=Xvfb :0 -screen 0 1920x1080x24 -ac +extension RANDR +extension RENDER
-autorestart=true
-priority=10
-
-[program:xfce]
-command=gosu '$USER' bash -c 'sleep 3; export DISPLAY=:0 HOME=$HOME; startxfce4'
-autorestart=true
-priority=20
-
+[program:vnc]
+command=gosu '$USER' bash '$VNCRUN_PATH'
+[program:novnc]
+command=gosu '$USER' bash -c "websockify --web=/usr/lib/novnc 80 localhost:5901"
 [program:rustdesk]
-command=bash /usr/lib/rustdesk/rustdesk_run.sh
+command=/usr/local/bin/rustdesk_run.sh
 autorestart=true
 priority=30
+environment=RD_HOME="$HOME",RD_PASSWORD="$RD_PASSWORD",RD_DISPLAY="$RD_DISPLAY"
 EOF
-
-# RustDesk wrapper(root 运行,euid=0 保证 IPC socket 在 /tmp/RustDesk-0/,并固定读 ubuntu 的配置目录)
-cat << 'EOF' > /usr/lib/rustdesk/rustdesk_run.sh
-#!/bin/bash
-sleep 8
-export DISPLAY=:0
-export HOME=/home/ubuntu
-exec /usr/lib/rustdesk/rustdesk --server --no-tray
-EOF
-chmod 755 /usr/lib/rustdesk/rustdesk_run.sh
 
 # colcon
 BASHRC_PATH="$HOME/.bashrc"
@@ -75,26 +146,7 @@ chown "$USER:$USER" "$BASHRC_PATH"
 mkdir -p "$HOME/.ros"
 cp -r /root/.ros/rosdep "$HOME/.ros/rosdep"
 chown -R "$USER:$USER" "$HOME/.ros"
-#profile termiator
-mkdir -p "$HOME/Desktop/.config/terminator"
-cat << EOF > "$HOME/Desktop/.config/terminator/config"
-[global_config]
-[keybindings]
-[profiles]
-  [[default]]
-    background_color = "#ffffff"
-    cursor_color = "#aaaaaa"
-    foreground_color = "#000000"
-[layouts]
-  [[default]]
-    [[[window0]]]
-      type = Window
-      parent = ""
-    [[[child1]]]
-      type = Terminal
-      parent = window0
-[plugins]
-EOF
+
 # Add terminator shortcut
 mkdir -p "$HOME/Desktop"
 cat << EOF > "$HOME/Desktop/terminator.desktop"
@@ -341,8 +393,29 @@ Name[uk]=Відкрити нове вікно у потайливому режи
 Name[zh_TW]=開啟新隱私瀏覽視窗
 Exec=firefox -private-window
 EOF
-chown -R "$USER:$USER" "$HOME/Desktop"
+cat << EOF > "$HOME/Desktop/codium.desktop"
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=VSCodium
+Comment=Code Editing. Redefined.
+GenericName=Text Editor
+Exec=/usr/share/codium/codium --unity-launch %F
+Icon=vscodium
+Type=Application
+StartupNotify=false
+StartupWMClass=VSCodium
+Categories=TextEditor;Development;IDE;
+MimeType=text/plain;inode/directory;application/x-codium-workspace;
+Actions=new-empty-window;
+Keywords=vscode;
+
+[Desktop Action new-empty-window]
+Name=New Empty Window
+Exec=/usr/share/codium/codium --new-window %F
+Icon=vscodium
+EOF
 chmod +x "$HOME/Desktop/*.desktop"
+chown -R "$USER:$USER" "$HOME/Desktop"
 
 # clearup
 PASSWORD=
@@ -354,4 +427,3 @@ echo -e 'See \e]8;;https://github.com/Tiryoh/docker-ros2-desktop-vnc/issue/131\e
 echo "============================================================================================"
 
 exec /bin/tini -- supervisord -n -c /etc/supervisor/supervisord.conf
-exec gosu $USER "$@"
