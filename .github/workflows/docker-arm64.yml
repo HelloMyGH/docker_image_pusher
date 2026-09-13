@@ -1,0 +1,119 @@
+name: Build Docker ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  discover-projects:
+    name: Discover Projects
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Directories
+      id: set-matrix
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # 提取包含 Dockerfile 的实际目录路径（去除 ./ 前缀）
+          CHANGED_DIRS=$(find . -maxdepth 2 -name "Dockerfile" -exec dirname {} \; | sed 's|^\./||' | sort -u)
+        else
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}")
+          fi
+          # 只取一级目录名
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | cut -d'/' -f1 | sort -u)
+        fi
+
+        JSON_OUTPUT="["
+        HAS_VALID_PROJECT=false
+        
+        for dir in $CHANGED_DIRS; do
+          if [ -d "$dir" ] && [ -f "$dir/Dockerfile" ]; then
+            HAS_VALID_PROJECT=true
+            # 提取最后一级目录名用于解析 name 和 tag
+            base_dir=$(basename "$dir")
+            if [[ "$base_dir" == *_* ]]; then
+              raw_name="${base_dir%_*}"
+              raw_tag="${base_dir##*_}"
+            else
+              raw_name="$base_dir"
+              raw_tag="latest"
+            fi
+            img_name=$(echo "$raw_name" | tr '[:upper:]' '[:lower:]')
+            img_tag=$(echo "$raw_tag" | tr '[:upper:]' '[:lower:]')
+            JSON_OUTPUT+="{\"dir\":\"$dir\",\"name\":\"$img_name\",\"tag\":\"$img_tag\"},"
+          fi
+        done
+
+        if [ "$HAS_VALID_PROJECT" = true ]; then
+          JSON_OUTPUT="${JSON_OUTPUT%,}]"
+          echo "matrix=$JSON_OUTPUT" >> $GITHUB_OUTPUT
+        else
+          echo "matrix=[]" >> $GITHUB_OUTPUT
+        fi
+
+  build-and-push:
+    name: Build & Push to Aliyun
+    needs: discover-projects
+    if: ${{ needs['discover-projects'].outputs.matrix != '[]' && needs['discover-projects'].outputs.matrix != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJson(needs['discover-projects'].outputs.matrix) }}
+        
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Setup Docker buildx
+      uses: docker/setup-buildx-action@v3
+
+    # 1. 登录到阿里云镜像服务容器
+    - name: Login to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ secrets.ALIYUN_REGISTRY }}
+        username: ${{ secrets.ALIYUN_REGISTRY_USER }}
+        password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-arm64-${{ matrix.project.dir }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-arm64-${{ matrix.project.dir }}-
+
+    # 2. 修改编译步骤：直接 Push 目标镜像至阿里云
+    - name: Build and Push Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: ./${{ matrix.project.dir }}
+        file: ./${{ matrix.project.dir }}/Dockerfile
+        platforms: linux/arm64
+        # 开启推送到远程仓库
+        push: true
+        provenance: false
+        # 拼接阿里云镜像标准格式：registry/namespace/repository:tag
+        tags: |
+          ${{ secrets.ALIYUN_REGISTRY }}/${{ secrets.ALIYUN_NAME_SPACE }}/${{ matrix.project.name }}:${{ matrix.project.tag }}-arm64
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+    - name: Move cache
+      run: |
+        rm -rf /tmp/.buildx-cache
+        if [ -d /tmp/.buildx-cache-new ]; then
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+        fi
