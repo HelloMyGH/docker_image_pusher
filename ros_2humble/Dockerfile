@@ -118,7 +118,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
 RUN rm /etc/apt/apt.conf.d/docker-clean
 
 COPY ./entrypoint.sh /
-RUN dos2unix /entrypoint.sh
+RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh
 ENTRYPOINT [ "/bin/bash", "-c", "/entrypoint.sh" ]
 
 ENV USER ubuntu
