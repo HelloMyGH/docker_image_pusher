@@ -43,10 +43,30 @@ RUN apt-get update && \
         tigervnc-standalone-server tigervnc-common \
         supervisor wget curl gosu git sudo python3-pip tini \
         build-essential vim sudo lsb-release locales \
-        bash-completion tzdata terminator && \
+        bash-completion tzdata terminator gedit \
+        openssh-server && \
+    mkdir -p /run/sshd && \
+    ssh-keygen -A && \
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
+
+# 深度汉化: 中文语言包 + 中文字体
+RUN apt-get update -q && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        language-pack-zh-hans language-pack-gnome-zh-hans \
+        fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei && \
+    apt-get autoclean && \
+    apt-get autoremove && \
+    rm -rf /var/lib/apt/lists/*
+
+# 设置中文 locale
+RUN locale-gen en_US.UTF-8 zh_CN.UTF-8 && \
+    cat > /etc/default/locale <<'EOF'
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
+EOF
 
 # noVNC and Websockify
 RUN git clone https://github.com/AtsushiSaito/noVNC.git -b add_clipboard_support /usr/lib/novnc
@@ -82,6 +102,11 @@ RUN wget https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg
     apt-get autoclean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
+
+# 移除 Codeium 扩展(无法启动且多余), 覆盖所有可能的系统扩展目录
+RUN find /usr/lib/codium /usr/share/codium /opt -ipath '*extensions*codeium*' -exec rm -rf {} + 2>/dev/null; \
+    find /usr/lib/codium /usr/share/codium /opt -ipath '*Codeium*' -exec rm -rf {} + 2>/dev/null; \
+    true
 
 # Install ROS
 ENV ROS_DISTRO noetic

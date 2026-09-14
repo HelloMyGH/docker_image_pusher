@@ -91,6 +91,9 @@ XSTARTUP_PATH="$HOME/.vnc/xstartup"
 cat << EOF > "$XSTARTUP_PATH"
 #!/bin/sh
 unset DBUS_SESSION_BUS_ADDRESS
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
 mate-session
 EOF
 chown "$USER:$USER" "$XSTARTUP_PATH"
@@ -134,7 +137,86 @@ command=/usr/local/bin/rustdesk_run.sh
 autorestart=true
 priority=30
 environment=RD_HOME="$HOME",RD_PASSWORD="$RD_PASSWORD",RD_DISPLAY="$RD_DISPLAY"
+[program:sshd]
+command=/usr/sbin/sshd -D
+autorestart=true
+priority=10
 EOF
+
+# SSH 配置: 允许 ubuntu 用户密码登录(密码与系统账户一致为 1234)
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+
+# 用户级中文 locale
+grep -q 'LANG=' "$HOME/.profile" || cat >> "$HOME/.profile" <<'EOF'
+
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
+EOF
+
+# Terminator: 白底黑字
+mkdir -p "$HOME/.config/terminator"
+cat << 'EOF' > "$HOME/.config/terminator/config"
+[global_config]
+  profile = default
+[keybindings]
+[profiles]
+  [[default]]
+    background_color = "#ffffff"
+    foreground_color = "#000000"
+    cursor_color = "#000000"
+    use_system_font = True
+[layouts]
+  [[default]]
+    [[[window0]]]
+      type = Window
+      parent = ""
+    [[[child1]]]
+      type = Terminal
+      parent = window0
+EOF
+chown -R "$USER:$USER" "$HOME/.config/terminator"
+
+# 登录后自动执行: 取消锁屏/息屏 + 桌面图标信任 + 清理 codeium
+mkdir -p "$HOME/.config/autostart" "$HOME/.local/bin"
+cat << 'EOF' > "$HOME/.local/bin/setup-desktop.sh"
+#!/bin/bash
+sleep 3
+# 取消锁屏与自动息屏(密码 1234 仍保留, 用于 ssh/解锁回退)
+gsettings set org.mate.screensaver lock-enabled false 2>/dev/null
+gsettings set org.mate.screensaver idle-activation-enabled false 2>/dev/null
+gsettings set org.mate.power-manager idle-dim-battery false 2>/dev/null
+gsettings set org.mate.power-manager idle-autoshutdown false 2>/dev/null
+# 信任桌面启动器(消除 untrusted application launcher, 恢复应用图标)
+for f in "$HOME"/Desktop/*.desktop; do
+    [ -f "$f" ] || continue
+    chmod +x "$f"
+    gio set "$f" metadata::trusted true 2>/dev/null
+done
+# 清理 Codeium
+rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium \
+       "$HOME"/.vscode-codium/extensions/*codeium* \
+       "$HOME"/.vscode-oss/extensions/*codeium* \
+       "$HOME"/.config/VSCodium/extensions/*codeium* 2>/dev/null
+exit 0
+EOF
+cat << EOF > "$HOME/.config/autostart/setup-desktop.desktop"
+[Desktop Entry]
+Type=Application
+Name=SetupDesktop
+Exec=$HOME/.local/bin/setup-desktop.sh
+X-GNOME-Autostart-enabled=true
+EOF
+chmod +x "$HOME/.local/bin/setup-desktop.sh"
+chown -R "$USER:$USER" "$HOME/.config/autostart" "$HOME/.local"
+
+# 启动时即清理 Codeium(用户目录, 无需等待登录)
+rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium \
+       "$HOME"/.vscode-codium/extensions/*codeium* \
+       "$HOME"/.vscode-oss/extensions/*codeium* \
+       "$HOME"/.config/VSCodium/extensions/*codeium* 2>/dev/null
 
 # colcon
 BASHRC_PATH="$HOME/.bashrc"
@@ -414,7 +496,10 @@ Name=New Empty Window
 Exec=/usr/share/codium/codium --new-window %F
 Icon=vscodium
 EOF
-chmod +x "$HOME/Desktop/*.desktop"
+# 桌面图标: 可执行 + 尽力信任(会话内由 autostart 再次执行 gio set 确保生效)
+for f in "$HOME"/Desktop/*.desktop; do
+    chmod +x "$f" 2>/dev/null || true
+done
 chown -R "$USER:$USER" "$HOME/Desktop"
 
 # clearup
