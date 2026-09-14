@@ -92,22 +92,6 @@ RUN DEBIAN_FRONTEND=noninteractive add-apt-repository ppa:mozillateam/ppa -y && 
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
 
-# Install VSCodium
-RUN wget https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg \
-    -O /usr/share/keyrings/vscodium-archive-keyring.asc && \
-    echo 'deb [ signed-by=/usr/share/keyrings/vscodium-archive-keyring.asc ] https://paulcarroty.gitlab.io/vscodium-deb-rpm-repo/debs vscodium main' \
-    | tee /etc/apt/sources.list.d/vscodium.list && \
-    apt-get update -q && \
-    apt-get install -y codium && \
-    apt-get autoclean && \
-    apt-get autoremove && \
-    rm -rf /var/lib/apt/lists/*
-
-# 移除 Codeium 扩展(无法启动且多余), 覆盖所有可能的系统扩展目录
-RUN find /usr/lib/codium /usr/share/codium /opt -ipath '*extensions*codeium*' -exec rm -rf {} + 2>/dev/null; \
-    find /usr/lib/codium /usr/share/codium /opt -ipath '*Codeium*' -exec rm -rf {} + 2>/dev/null; \
-    true
-
 # Install ROS
 ENV ROS_DISTRO noetic
 # desktop or ros-base

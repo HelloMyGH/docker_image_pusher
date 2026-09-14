@@ -196,10 +196,7 @@ for f in "$HOME"/Desktop/*.desktop; do
     gio set "$f" metadata::trusted true 2>/dev/null
 done
 # 清理 Codeium
-rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium \
-       "$HOME"/.vscode-codium/extensions/*codeium* \
-       "$HOME"/.vscode-oss/extensions/*codeium* \
-       "$HOME"/.config/VSCodium/extensions/*codeium* 2>/dev/null
+rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium 2>/dev/null
 exit 0
 EOF
 cat << EOF > "$HOME/.config/autostart/setup-desktop.desktop"
@@ -213,10 +210,7 @@ chmod +x "$HOME/.local/bin/setup-desktop.sh"
 chown -R "$USER:$USER" "$HOME/.config/autostart" "$HOME/.local"
 
 # 启动时即清理 Codeium(用户目录, 无需等待登录)
-rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium \
-       "$HOME"/.vscode-codium/extensions/*codeium* \
-       "$HOME"/.vscode-oss/extensions/*codeium* \
-       "$HOME"/.config/VSCodium/extensions/*codeium* 2>/dev/null
+rm -rf "$HOME"/.config/Codeium "$HOME"/.codeium 2>/dev/null
 
 # colcon
 BASHRC_PATH="$HOME/.bashrc"
@@ -474,27 +468,6 @@ Name[tr]=Yeni gizli pencere aç
 Name[uk]=Відкрити нове вікно у потайливому режимі
 Name[zh_TW]=開啟新隱私瀏覽視窗
 Exec=firefox -private-window
-EOF
-cat << EOF > "$HOME/Desktop/codium.desktop"
-#!/usr/bin/env xdg-open
-[Desktop Entry]
-Name=VSCodium
-Comment=Code Editing. Redefined.
-GenericName=Text Editor
-Exec=/usr/share/codium/codium --unity-launch %F
-Icon=vscodium
-Type=Application
-StartupNotify=false
-StartupWMClass=VSCodium
-Categories=TextEditor;Development;IDE;
-MimeType=text/plain;inode/directory;application/x-codium-workspace;
-Actions=new-empty-window;
-Keywords=vscode;
-
-[Desktop Action new-empty-window]
-Name=New Empty Window
-Exec=/usr/share/codium/codium --new-window %F
-Icon=vscodium
 EOF
 # 桌面图标: 可执行 + 尽力信任(会话内由 autostart 再次执行 gio set 确保生效)
 for f in "$HOME"/Desktop/*.desktop; do
