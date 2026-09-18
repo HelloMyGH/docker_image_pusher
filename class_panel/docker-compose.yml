@@ -1,0 +1,12 @@
+services:
+  class-panel:
+    build: .
+    image: class-panel:latest
+    container_name: class-panel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORTAINER_URL=http://10.22.27.32:9000
+      - PORTAINER_TOKEN=ptr_3ozh4oZAjYimKLDLf08duxWsgJpDK/B6mQHCGXKdV+4=
+      - ENDPOINT_MAP=pc01=3,pc02=4,pc03=6,pc04=7,pc05=8,pc06=9,pc07=10,pc08=11,pc09=12

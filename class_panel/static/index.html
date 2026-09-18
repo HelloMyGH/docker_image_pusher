@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>班级控制面板</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f7; padding: 20px; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 24px; color: #1f2937; }
+  .btns { display: flex; gap: 10px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: background .2s; }
+  .btn-primary { background: #4f46e5; color: white; }
+  .btn-primary:hover:not(:disabled) { background: #4338ca; }
+  .btn-danger { background: #dc2626; color: white; }
+  .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .matrix { background: white; border-radius: 10px; padding: 16px; overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: center; min-width: 110px; }
+  th { background: #f9fafb; font-weight: 600; }
+  td:first-child { background: #f9fafb; font-weight: 600; }
+  .status { font-size: 12px; padding: 2px 10px; border-radius: 10px; display: inline-block; margin-bottom: 8px; }
+  .status-active { background: #dcfce7; color: #166534; }
+  .status-inactive { background: #f3f4f6; color: #6b7280; }
+  .status-error { background: #fee2e2; color: #991b1b; }
+  .status-unknown { background: #fef3c7; color: #92400e; }
+  #msg { margin-bottom: 14px; }
+  .msg { padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+  .msg-ok { background: #dcfce7; color: #166534; }
+  .msg-err { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>班级控制面板</h1>
+  <div class="btns">
+    <button class="btn btn-primary" onclick="load()">刷新</button>
+    <button class="btn btn-danger" onclick="stopAll()">全部停止</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div class="matrix" id="matrix">加载中...</div>
+
+<script>
+let data = null;
+const sClass = { active: 'status-active', inactive: 'status-inactive', error: 'status-error' };
+const sLabel = { active: '运行中', inactive: '已停止', error: '错误' };
+
+function showMsg(text, ok) {
+  const el = document.getElementById('msg');
+  el.innerHTML = `<div class="msg ${ok ? 'msg-ok' : 'msg-err'}">${text}</div>`;
+  if (ok) setTimeout(() => el.innerHTML = '', 4000);
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/status');
+    data = await res.json();
+    render();
+  } catch (e) {
+    showMsg('无法连接服务: ' + e, false);
+  }
+}
+
+function render() {
+  const m = document.getElementById('matrix');
+  if (!data || !data.pcs.length) { m.innerHTML = '<p>无数据</p>'; return; }
+  const classes = data.classes;
+  let h = '<table><thead><tr><th>PC \\ 班级</th>';
+  for (const c of classes) h += `<th>${c}</th>`;
+  h += '</tr></thead><tbody>';
+  for (const pc of data.pcs) {
+    h += `<tr><td>${pc.name}</td>`;
+    for (const c of classes) {
+      const st = pc.stacks.find(s => s.name === c);
+      if (!st) { h += '<td>-</td>'; continue; }
+      const cls = sClass[st.status_text] || 'status-unknown';
+      const lbl = sLabel[st.status_text] || st.status_text;
+      const dis = st.status === 1 ? 'disabled' : '';
+      h += `<td><span class="status ${cls}">${lbl}</span><br><button class="btn btn-primary" ${dis} onclick="startClass('${pc.name}','${c}')">启动</button></td>`;
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table>';
+  m.innerHTML = h;
+}
+
+async function startClass(pc, cls) {
+  showMsg(`正在 ${pc} 启动 ${cls}...`, true);
+  try {
+    const res = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pc, class: cls })
+    });
+    const json = await res.json();
+    if (json.ok) {
+      const c = json.data?.cleaned || 0;
+      showMsg(`${pc} 上 ${cls} 启动成功${c > 0 ? `（清理了 ${c} 个冲突容器）` : ''}`, true);
+    } else {
+      showMsg(`启动失败: ${json.message || '未知错误'}`, false);
+    }
+  } catch (e) {
+    showMsg('请求异常: ' + e, false);
+  }
+  setTimeout(load, 1500);
+}
+
+async function stopAll() {
+  if (!confirm('确认停止所有 PC 上的全部 stack？')) return;
+  showMsg('正在停止所有 stack...', true);
+  try {
+    const res = await fetch('/api/stop-all', { method: 'POST' });
+    const json = await res.json();
+    showMsg(json.ok ? '已发送停止指令' : ('失败: ' + (json.message || '未知错误')), json.ok);
+  } catch (e) {
+    showMsg('请求异常: ' + e, false);
+  }
+  setTimeout(load, 2000);
+}
+
+load();
+</script>
+</body>
+</html>
