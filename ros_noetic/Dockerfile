@@ -22,6 +22,29 @@ LABEL maintainer="Tiryoh<tiryoh@gmail.com>"
 
 SHELL ["/bin/bash", "-c"]
 
+# ubuntu:focal 基础镜像默认通过 dpkg 过滤丢弃所有 .mo 翻译文件
+# (/etc/dpkg/dpkg.cfg.d/excludes: path-exclude=/usr/share/locale/*/LC_MESSAGES/*.mo),
+# 导致经 apt 安装的 MATE 组件(caja 文件管理器/mate-panel/marco/atril 等)和 terminator
+# 全部丢失自带中文翻译, 即使 LANG=zh_CN.UTF-8 菜单与右键仍是英文。
+# 改为白名单: 仅保留简/繁中文翻译, 其余语言继续排除以控制镜像体积。
+# 必须在第一次 apt-get install 之前生效。
+RUN cat > /etc/dpkg/dpkg.cfg.d/excludes <<'EOF'
+# Drop all man pages
+path-exclude=/usr/share/man/*
+
+# Drop all translations except Chinese (zh_CN/zh_TW/zh_HK/zh)
+path-exclude=/usr/share/locale/*/LC_MESSAGES/*.mo
+path-include=/usr/share/locale/zh_CN/LC_MESSAGES/*.mo
+path-include=/usr/share/locale/zh_TW/LC_MESSAGES/*.mo
+path-include=/usr/share/locale/zh_HK/LC_MESSAGES/*.mo
+path-include=/usr/share/locale/zh/LC_MESSAGES/*.mo
+
+# Drop all documentation except copyright/changelog
+path-exclude=/usr/share/doc/*
+path-include=/usr/share/doc/*/copyright
+path-include=/usr/share/doc/*/changelog.Debian.*
+EOF
+
 # Upgrade OS
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
@@ -43,7 +66,7 @@ RUN apt-get update && \
         tigervnc-standalone-server tigervnc-common \
         supervisor wget curl gosu git sudo python3-pip tini \
         build-essential vim sudo lsb-release locales \
-        bash-completion tzdata terminator gedit \
+        bash-completion tzdata terminator gedit dos2unix \
         openssh-server && \
     mkdir -p /run/sshd && \
     ssh-keygen -A && \
@@ -51,7 +74,9 @@ RUN apt-get update && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
 
-# 深度汉化: 中文语言包 + 中文字体
+# 中文语言包(GTK/GNOME 标准菜单 gtk30.mo 等位于 /usr/share/locale-langpack,
+# 不受上面的 dpkg excludes 影响) + 中文字体(防方块字)。
+# MATE 组件与 terminator 的自带翻译则依赖上面的 excludes 白名单, 两者缺一不可。
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
         language-pack-zh-hans language-pack-gnome-zh-hans \
@@ -60,13 +85,18 @@ RUN apt-get update -q && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/*
 
-# 设置中文 locale
+# 设置中文 locale: /etc/default/locale 供 PAM(SSH 登录会话)读取
 RUN locale-gen en_US.UTF-8 zh_CN.UTF-8 && \
     cat > /etc/default/locale <<'EOF'
 LANG=zh_CN.UTF-8
 LANGUAGE=zh_CN:zh
 LC_ALL=zh_CN.UTF-8
 EOF
+
+# 全局中文环境: docker exec / supervisord 派生的 VNC、novnc、RustDesk(root)、sshd 进程统一继承
+ENV LANG=zh_CN.UTF-8 \
+    LANGUAGE=zh_CN:zh \
+    LC_ALL=zh_CN.UTF-8
 
 # noVNC and Websockify
 RUN git clone https://github.com/AtsushiSaito/noVNC.git -b add_clipboard_support /usr/lib/novnc
@@ -148,7 +178,8 @@ ENV RD_ID="" \
     RD_DISPLAY=:1
 
 COPY ./entrypoint.sh /
-RUN chmod +x /entrypoint.sh
+# Windows 检出可能带入 CRLF, dos2unix 兜底, 避免 heredoc/命令行尾 \r 导致启动失败
+RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh
 ENTRYPOINT [ "/bin/bash", "-c", "/entrypoint.sh" ]
 
 ENV USER ubuntu

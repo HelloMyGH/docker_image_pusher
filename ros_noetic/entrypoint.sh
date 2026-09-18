@@ -57,6 +57,10 @@ cat << 'EOF' > $RUSTDESK_RUN
 #!/bin/bash
 export HOME="$RD_HOME"
 export DISPLAY="$RD_DISPLAY"
+# RustDesk 以 root 独立运行, 显式声明中文 locale(默认值与 Dockerfile ENV 一致, 兜底)
+export LANG="${LANG:-zh_CN.UTF-8}"
+export LANGUAGE="${LANGUAGE:-zh_CN:zh}"
+export LC_ALL="${LC_ALL:-zh_CN.UTF-8}"
 # 等待 X server(noVNC 的 vncserver :1)就绪
 for i in $(seq 1 60); do
     [ -e "/tmp/.X11-unix/X${RD_DISPLAY#:}" ] && break
@@ -91,6 +95,7 @@ XSTARTUP_PATH="$HOME/.vnc/xstartup"
 cat << EOF > "$XSTARTUP_PATH"
 #!/bin/sh
 unset DBUS_SESSION_BUS_ADDRESS
+# 显式导出中文 locale(与 Dockerfile ENV 双保险, 也兼容手动执行 xstartup 的场景)
 export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
@@ -148,13 +153,8 @@ sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/ssh
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
 
-# 用户级中文 locale
-grep -q 'LANG=' "$HOME/.profile" || cat >> "$HOME/.profile" <<'EOF'
-
-export LANG=zh_CN.UTF-8
-export LANGUAGE=zh_CN:zh
-export LC_ALL=zh_CN.UTF-8
-EOF
+# 中文 locale 已由 Dockerfile ENV(容器进程) + /etc/default/locale(SSH/PAM 会话)
+# + xstartup(VNC 会话)三处统一保证, 无需再向 .profile 追加。
 
 # Terminator: 白底黑字
 mkdir -p "$HOME/.config/terminator"
@@ -229,7 +229,9 @@ cat << EOF > "$HOME/Desktop/terminator.desktop"
 #!/usr/bin/env xdg-open
 [Desktop Entry]
 Name=Terminator
+Name[zh_CN]=终端
 Comment=Multiple terminals in one window
+Comment[zh_CN]=在一个窗口中使用多个终端
 TryExec=terminator
 Exec=terminator
 Icon=terminator
