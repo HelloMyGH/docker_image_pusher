@@ -4,17 +4,25 @@
 FROM rust:bookworm AS builder
 WORKDIR /app
 
+# 国内 cargo 源加速
 COPY .cargo .cargo
-COPY Cargo.toml Cargo.toml
 
-# 先编译依赖（利用 Docker 层缓存，改源码不重编依赖）
-RUN mkdir src && echo "fn main() {}" > src/main.rs \
- && cargo build --release 2>/dev/null || true
+# 先只拷 Cargo.toml 并下载依赖源码（此层可被缓存，仅依赖下载）
+COPY Cargo.toml ./
+RUN mkdir -p src \
+ && echo 'fn main() {}' > src/main.rs \
+ && cargo fetch
 
-# 拷贝真实源码并编译
-COPY src src
-COPY static static
+# 拷贝全部真实源码（覆盖 dummy main.rs）后一次性完整编译
+COPY src ./src/
+COPY static ./static/
 RUN cargo build --release
+
+# 硬性断言：真实二进制含 axum/tokio/reqwest，体积必然 > 5MB；
+# 若仍是 400 多 KB 的 dummy，构建直接失败，杜绝产出假镜像
+RUN size=$(stat -c%s target/release/class-panel) \
+ && echo "built binary size: $size bytes" \
+ && test "$size" -gt 5000000
 
 # ---------- 运行阶段 ----------
 FROM debian:bookworm-slim
