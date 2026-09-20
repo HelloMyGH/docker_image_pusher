@@ -92,6 +92,34 @@ struct StartResult {
     cleaned: usize,
 }
 
+#[derive(Deserialize)]
+struct BatchItem {
+    pc: String,
+    class: String,
+}
+
+#[derive(Deserialize)]
+struct BatchRequest {
+    items: Vec<BatchItem>,
+}
+
+#[derive(Serialize)]
+struct BatchItemResult {
+    pc: String,
+    class: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    cleaned: usize,
+}
+
+#[derive(Serialize)]
+struct BatchResult {
+    results: Vec<BatchItemResult>,
+    success: usize,
+    failed: usize,
+}
+
 #[derive(Serialize)]
 struct ApiResult<T: Serialize> {
     ok: bool,
@@ -137,10 +165,10 @@ fn parse_endpoint_map(s: &str) -> HashMap<String, i64> {
     m
 }
 
-type AppError = (StatusCode, String);
+struct AppError(StatusCode, String);
 
 fn err(status: StatusCode, msg: impl Into<String>) -> AppError {
-    (status, msg.into())
+    AppError(status, msg.into())
 }
 
 impl IntoResponse for AppError {
@@ -191,7 +219,7 @@ async fn get_stack_file(inner: &Inner, stack_id: i64) -> String {
 }
 
 fn extract_container_names(compose: &str) -> Vec<String> {
-    let re = regex::Regex::new(r"container_name:\s*['\"]?([A-Za-z0-9_-]+)").unwrap();
+    let re = regex::Regex::new(r#"container_name:\s*['"]?([A-Za-z0-9_-]+)"#).unwrap();
     re.captures_iter(compose).map(|c| c[1].to_string()).collect()
 }
 
@@ -236,7 +264,7 @@ async fn index() -> Html<&'static str> {
     Html(HTML)
 }
 
-async fn status(state: AppState) -> Result<Json<StatusResponse>, AppError> {
+async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, AppError> {
     let inner = &state.inner;
     let stacks = list_stacks(inner).await?;
 
@@ -274,33 +302,24 @@ async fn status(state: AppState) -> Result<Json<StatusResponse>, AppError> {
     Ok(Json(StatusResponse { pcs, classes }))
 }
 
-async fn start_class(
-    state: AppState,
-    Json(req): Json<StartRequest>,
-) -> Result<Json<ApiResult<StartResult>>, AppError> {
-    let inner = &state.inner;
+async fn do_start(inner: &Inner, pc: &str, class: &str) -> Result<StartResult, String> {
     let endpoint_id = inner
         .endpoints
-        .get(&req.pc)
+        .get(pc)
         .copied()
-        .ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("未知 PC: {}", req.pc)))?;
+        .ok_or_else(|| format!("未知 PC: {pc}"))?;
 
-    let stacks = list_stacks(inner).await?;
+    let stacks = list_stacks(inner).await.map_err(|e| e.1)?;
 
     let target = stacks
         .iter()
-        .find(|s| s.endpoint_id == endpoint_id && s.name == req.class)
-        .ok_or_else(|| {
-            err(
-                StatusCode::NOT_FOUND,
-                format!("在 {} 上未找到 stack {}", req.pc, req.class),
-            )
-        })?;
+        .find(|s| s.endpoint_id == endpoint_id && s.name == class)
+        .ok_or_else(|| format!("在 {pc} 上未找到 stack {class}"))?;
     let target_id = target.id;
 
     // 先停止该 PC 上其他正在运行的 stack
     for s in &stacks {
-        if s.endpoint_id == endpoint_id && s.name != req.class && s.status == 1 {
+        if s.endpoint_id == endpoint_id && s.name != class && s.status == 1 {
             let _ = inner
                 .post(&format!(
                     "/api/stacks/{}/stop?endpointId={}",
@@ -313,12 +332,12 @@ async fn start_class(
 
     // 已经在运行
     if target.status == 1 {
-        return Ok(ok(StartResult {
-            pc: req.pc,
-            class: req.class,
+        return Ok(StartResult {
+            pc: pc.to_string(),
+            class: class.to_string(),
             started: true,
             cleaned: 0,
-        }));
+        });
     }
 
     let start_url = format!("/api/stacks/{target_id}/start?endpointId={endpoint_id}");
@@ -326,7 +345,7 @@ async fn start_class(
         .post(&start_url)
         .send()
         .await
-        .map_err(|e| err(StatusCode::BAD_GATEWAY, e.to_string()))?;
+        .map_err(|e| e.to_string())?;
 
     let mut cleaned = 0;
 
@@ -341,28 +360,141 @@ async fn start_class(
             .post(&start_url)
             .send()
             .await
-            .map_err(|e| err(StatusCode::BAD_GATEWAY, e.to_string()))?;
+            .map_err(|e| e.to_string())?;
         if !resp2.status().is_success() {
             let body = resp2.text().await.unwrap_or_default();
-            return Err(err(
-                resp2.status(),
-                format!("清理冲突后启动仍失败: {body}"),
-            ));
+            return Err(format!("清理冲突后启动仍失败: {body}"));
         }
     } else if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(err(resp.status(), format!("启动失败: {body}")));
+        return Err(format!("启动失败: {body}"));
     }
 
-    Ok(ok(StartResult {
-        pc: req.pc,
-        class: req.class,
+    Ok(StartResult {
+        pc: pc.to_string(),
+        class: class.to_string(),
         started: true,
         cleaned,
+    })
+}
+
+async fn do_stop_single(inner: &Inner, pc: &str, class: &str) -> Result<(), String> {
+    let endpoint_id = inner
+        .endpoints
+        .get(pc)
+        .copied()
+        .ok_or_else(|| format!("未知 PC: {pc}"))?;
+    let stacks = list_stacks(inner).await.map_err(|e| e.1)?;
+    let target = stacks
+        .iter()
+        .find(|s| s.endpoint_id == endpoint_id && s.name == class)
+        .ok_or_else(|| format!("在 {pc} 上未找到 stack {class}"))?;
+    if target.status == 1 {
+        let resp = inner
+            .post(&format!(
+                "/api/stacks/{}/stop?endpointId={}",
+                target.id, endpoint_id
+            ))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("停止失败: {body}"));
+        }
+    }
+    Ok(())
+}
+
+async fn start_class(
+    State(state): State<AppState>,
+    Json(req): Json<StartRequest>,
+) -> Result<Json<ApiResult<StartResult>>, AppError> {
+    match do_start(&state.inner, &req.pc, &req.class).await {
+        Ok(r) => Ok(ok(r)),
+        Err(m) => Err(err(StatusCode::BAD_GATEWAY, m)),
+    }
+}
+
+async fn batch_start(
+    State(state): State<AppState>,
+    Json(req): Json<BatchRequest>,
+) -> Result<Json<ApiResult<BatchResult>>, AppError> {
+    let inner = &state.inner;
+    let mut results = Vec::new();
+    let mut success = 0usize;
+    let mut failed = 0usize;
+    for it in &req.items {
+        match do_start(inner, &it.pc, &it.class).await {
+            Ok(r) => {
+                success += 1;
+                results.push(BatchItemResult {
+                    pc: it.pc.clone(),
+                    class: it.class.clone(),
+                    ok: true,
+                    message: None,
+                    cleaned: r.cleaned,
+                });
+            }
+            Err(m) => {
+                failed += 1;
+                results.push(BatchItemResult {
+                    pc: it.pc.clone(),
+                    class: it.class.clone(),
+                    ok: false,
+                    message: Some(m),
+                    cleaned: 0,
+                });
+            }
+        }
+    }
+    Ok(ok(BatchResult {
+        results,
+        success,
+        failed,
     }))
 }
 
-async fn stop_all(state: AppState) -> Result<Json<ApiResult<()>>, AppError> {
+async fn batch_stop(
+    State(state): State<AppState>,
+    Json(req): Json<BatchRequest>,
+) -> Result<Json<ApiResult<BatchResult>>, AppError> {
+    let inner = &state.inner;
+    let mut results = Vec::new();
+    let mut success = 0usize;
+    let mut failed = 0usize;
+    for it in &req.items {
+        match do_stop_single(inner, &it.pc, &it.class).await {
+            Ok(()) => {
+                success += 1;
+                results.push(BatchItemResult {
+                    pc: it.pc.clone(),
+                    class: it.class.clone(),
+                    ok: true,
+                    message: None,
+                    cleaned: 0,
+                });
+            }
+            Err(m) => {
+                failed += 1;
+                results.push(BatchItemResult {
+                    pc: it.pc.clone(),
+                    class: it.class.clone(),
+                    ok: false,
+                    message: Some(m),
+                    cleaned: 0,
+                });
+            }
+        }
+    }
+    Ok(ok(BatchResult {
+        results,
+        success,
+        failed,
+    }))
+}
+
+async fn stop_all(State(state): State<AppState>) -> Result<Json<ApiResult<()>>, AppError> {
     let inner = &state.inner;
     let stacks = list_stacks(inner).await?;
     for s in &stacks {
@@ -409,6 +541,8 @@ async fn main() {
         .route("/api/status", get(status))
         .route("/api/start", post(start_class))
         .route("/api/stop-all", post(stop_all))
+        .route("/api/batch-start", post(batch_start))
+        .route("/api/batch-stop", post(batch_stop))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")

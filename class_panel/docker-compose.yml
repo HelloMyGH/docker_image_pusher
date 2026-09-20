@@ -1,6 +1,6 @@
 services:
   class-panel:
-    image: registry.cn-hangzhou.aliyuncs.com/mypkg/class:panel-amd64
+    image: class-panel:verify
     container_name: class-panel
     restart: unless-stopped
     ports:

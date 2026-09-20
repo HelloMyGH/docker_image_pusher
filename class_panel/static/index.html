@@ -9,34 +9,41 @@
   body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f7; padding: 20px; }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
   h1 { font-size: 24px; color: #1f2937; }
-  .btns { display: flex; gap: 10px; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
   .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: background .2s; }
   .btn-primary { background: #4f46e5; color: white; }
   .btn-primary:hover:not(:disabled) { background: #4338ca; }
   .btn-danger { background: #dc2626; color: white; }
   .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+  .btn-secondary { background: #6b7280; color: white; }
+  .btn-secondary:hover:not(:disabled) { background: #4b5563; }
   .btn:disabled { opacity: .4; cursor: not-allowed; }
   .matrix { background: white; border-radius: 10px; padding: 16px; overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: center; min-width: 110px; }
   th { background: #f9fafb; font-weight: 600; }
-  td:first-child { background: #f9fafb; font-weight: 600; }
-  .status { font-size: 12px; padding: 2px 10px; border-radius: 10px; display: inline-block; margin-bottom: 8px; }
+  td:first-child, th:first-child { background: #f9fafb; font-weight: 600; position: sticky; left: 0; z-index: 2; }
+  .status { font-size: 12px; padding: 2px 10px; border-radius: 10px; display: inline-block; margin-bottom: 6px; }
   .status-active { background: #dcfce7; color: #166534; }
   .status-inactive { background: #f3f4f6; color: #6b7280; }
   .status-error { background: #fee2e2; color: #991b1b; }
   .status-unknown { background: #fef3c7; color: #92400e; }
+  .cell-box { margin: 4px 0; }
   #msg { margin-bottom: 14px; }
   .msg { padding: 10px 14px; border-radius: 6px; font-size: 14px; }
   .msg-ok { background: #dcfce7; color: #166534; }
   .msg-err { background: #fee2e2; color: #991b1b; }
+  .col-select input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="header">
   <h1>班级控制面板</h1>
   <div class="btns">
-    <button class="btn btn-primary" onclick="load()">刷新</button>
+    <button class="btn btn-secondary" onclick="load()">刷新</button>
+    <button class="btn btn-primary" onclick="batchRun('start')">一键启动勾选</button>
+    <button class="btn btn-danger" onclick="batchRun('stop')">一键停止勾选</button>
+    <button class="btn btn-secondary" onclick="clearChecks()">清除勾选</button>
     <button class="btn btn-danger" onclick="stopAll()">全部停止</button>
   </div>
 </div>
@@ -51,7 +58,7 @@ const sLabel = { active: '运行中', inactive: '已停止', error: '错误' };
 function showMsg(text, ok) {
   const el = document.getElementById('msg');
   el.innerHTML = `<div class="msg ${ok ? 'msg-ok' : 'msg-err'}">${text}</div>`;
-  if (ok) setTimeout(() => el.innerHTML = '', 4000);
+  if (ok) setTimeout(() => { if (el.innerHTML.indexOf('msg-ok') >= 0) el.innerHTML = ''; }, 5000);
 }
 
 async function load() {
@@ -69,7 +76,9 @@ function render() {
   if (!data || !data.pcs.length) { m.innerHTML = '<p>无数据</p>'; return; }
   const classes = data.classes;
   let h = '<table><thead><tr><th>PC \\ 班级</th>';
-  for (const c of classes) h += `<th>${c}</th>`;
+  for (const c of classes) {
+    h += `<th class="col-select"><label><input type="checkbox" onclick="toggleCol('${c}', this.checked)">&nbsp;${c}</label></th>`;
+  }
   h += '</tr></thead><tbody>';
   for (const pc of data.pcs) {
     h += `<tr><td>${pc.name}</td>`;
@@ -79,12 +88,34 @@ function render() {
       const cls = sClass[st.status_text] || 'status-unknown';
       const lbl = sLabel[st.status_text] || st.status_text;
       const dis = st.status === 1 ? 'disabled' : '';
-      h += `<td><span class="status ${cls}">${lbl}</span><br><button class="btn btn-primary" ${dis} onclick="startClass('${pc.name}','${c}')">启动</button></td>`;
+      h += `<td>
+        <div class="cell-box"><input type="checkbox" class="cell-check" data-pc="${pc.name}" data-class="${c}"></div>
+        <span class="status ${cls}">${lbl}</span><br>
+        <button class="btn btn-primary" ${dis} onclick="startClass('${pc.name}','${c}')">启动</button>
+      </td>`;
     }
     h += '</tr>';
   }
   h += '</tbody></table>';
   m.innerHTML = h;
+}
+
+// 勾选某班级列：勾选/取消该列所有 PC 的格子
+function toggleCol(c, checked) {
+  document.querySelectorAll(`.cell-check[data-class="${c}"]`).forEach(cb => { cb.checked = checked; });
+}
+
+function clearChecks() {
+  document.querySelectorAll('.cell-check, .col-select input[type=checkbox]').forEach(cb => { cb.checked = false; });
+}
+
+// 收集所有勾选的 (pc, class)
+function collectChecked() {
+  const items = [];
+  document.querySelectorAll('.cell-check:checked').forEach(cb => {
+    items.push({ pc: cb.dataset.pc, class: cb.dataset.class });
+  });
+  return items;
 }
 
 async function startClass(pc, cls) {
@@ -106,6 +137,37 @@ async function startClass(pc, cls) {
     showMsg('请求异常: ' + e, false);
   }
   setTimeout(load, 1500);
+}
+
+async function batchRun(action) {
+  const items = collectChecked();
+  if (!items.length) { showMsg('请先勾选要' + (action === 'start' ? '启动' : '停止') + '的班级', false); return; }
+  const verb = action === 'start' ? '启动' : '停止';
+  if (!confirm(`确认${verb} ${items.length} 个勾选项？`)) return;
+  showMsg(`正在批量${verb} ${items.length} 项...`, true);
+  try {
+    const res = await fetch(`/api/batch-${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    const json = await res.json();
+    if (json.ok) {
+      const d = json.data;
+      const fails = d.results.filter(r => !r.ok);
+      if (fails.length === 0) {
+        showMsg(`批量${verb}完成：成功 ${d.success} 项`, true);
+      } else {
+        const detail = fails.map(r => `${r.pc}/${r.class}: ${r.message}`).join('; ');
+        showMsg(`批量${verb}：成功 ${d.success}，失败 ${d.failed}。失败详情: ${detail}`, false);
+      }
+    } else {
+      showMsg(`批量${verb}失败: ${json.message || '未知错误'}`, false);
+    }
+  } catch (e) {
+    showMsg('请求异常: ' + e, false);
+  }
+  setTimeout(load, 2000);
 }
 
 async function stopAll() {
