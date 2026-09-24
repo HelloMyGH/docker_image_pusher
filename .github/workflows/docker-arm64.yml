@@ -19,8 +19,8 @@ jobs:
       id: set-matrix
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          # 提取包含 Dockerfile 的实际目录路径（去除 ./ 前缀）
-          CHANGED_DIRS=$(find . -maxdepth 2 -name "Dockerfile" -exec dirname {} \; | sed 's|^\./||' | sort -u)
+          # 提取包含 Dockerfile-arm64 的实际目录路径（去除 ./ 前缀）
+          CHANGED_DIRS=$(find . -maxdepth 2 -name "Dockerfile-arm64" -exec dirname {} \; | sed 's|^\./||' | sort -u)
         else
           if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
             CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
@@ -35,7 +35,7 @@ jobs:
         HAS_VALID_PROJECT=false
         
         for dir in $CHANGED_DIRS; do
-          if [ -d "$dir" ] && [ -f "$dir/Dockerfile" ]; then
+          if [ -d "$dir" ] && [ -f "$dir/Dockerfile-arm64" ]; then
             HAS_VALID_PROJECT=true
             # 提取最后一级目录名用于解析 name 和 tag
             base_dir=$(basename "$dir")
@@ -100,7 +100,7 @@ jobs:
       uses: docker/build-push-action@v6
       with:
         context: ./${{ matrix.project.dir }}
-        file: ./${{ matrix.project.dir }}/Dockerfile
+        file: ./${{ matrix.project.dir }}/Dockerfile-arm64
         platforms: linux/arm64
         # 开启推送到远程仓库
         push: true
