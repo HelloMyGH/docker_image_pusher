@@ -177,6 +177,18 @@ ENV RD_ID="" \
     RD_PASSWORD=1234 \
     RD_DISPLAY=:1
 
+# === 扩展依赖层 ===
+# 用途: 后续容器缺依赖时, 只在本层追加包名, 不要改动上面的层。
+# 本层位于所有大层(MATE/ROS/Firefox/Gazebo)之后, 修改它不会使前面的层缓存失效,
+# 因此 docker build 只重建本层及之后的少量小层,
+# docker push/pull 也只需传输这些增量层, 更新很快。
+# 用法: 在下面的包列表里追加(或替换)为实际需要的包, 例如 vim htop iputils-ping。
+# 注意: 必须自带 apt-get update, 并在末尾清理 lists 以控制层体积。
+RUN apt-get update -q && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ./entrypoint.sh /
 # Windows 检出可能带入 CRLF, dos2unix 兜底, 避免 heredoc/命令行尾 \r 导致启动失败
 RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh
