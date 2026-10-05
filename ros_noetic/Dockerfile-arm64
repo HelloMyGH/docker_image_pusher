@@ -186,7 +186,7 @@ ENV RD_ID="" \
 # 注意: 必须自带 apt-get update, 并在末尾清理 lists 以控制层体积。
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates \
+        ca-certificates ros-noetic-arbotix \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ./entrypoint.sh /
