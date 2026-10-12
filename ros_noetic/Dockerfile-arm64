@@ -186,7 +186,9 @@ ENV RD_ID="" \
 # 注意: 必须自带 apt-get update, 并在末尾清理 lists 以控制层体积。
 RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates ros-noetic-arbotix ros-noetic-gazebo-ros-control \
+        ca-certificates ros-noetic-arbotix ros-noetic-gazebo-ros-control ros-noetic-gmapping \
+        ros-noetic-teleop-twist-keyboard ros-noetic-map-server ros-noetic-amcl \
+         ros-noetic-move-base ros-noetic-global-planner ros-noetic-dwa-local-planner ros-noetic-teb-local-planner \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ./entrypoint.sh /
