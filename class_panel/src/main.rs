@@ -317,19 +317,6 @@ async fn do_start(inner: &Inner, pc: &str, class: &str) -> Result<StartResult, S
         .ok_or_else(|| format!("在 {pc} 上未找到 stack {class}"))?;
     let target_id = target.id;
 
-    // 先停止该 PC 上其他正在运行的 stack
-    for s in &stacks {
-        if s.endpoint_id == endpoint_id && s.name != class && s.status == 1 {
-            let _ = inner
-                .post(&format!(
-                    "/api/stacks/{}/stop?endpointId={}",
-                    s.id, endpoint_id
-                ))
-                .send()
-                .await;
-        }
-    }
-
     // 已经在运行
     if target.status == 1 {
         return Ok(StartResult {
