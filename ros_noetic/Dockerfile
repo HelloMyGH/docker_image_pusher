@@ -188,7 +188,7 @@ RUN apt-get update -q && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates ros-noetic-arbotix ros-noetic-gazebo-ros-control ros-noetic-gmapping \
         ros-noetic-teleop-twist-keyboard ros-noetic-map-server ros-noetic-amcl \
-         ros-noetic-move-base ros-noetic-global-planner ros-noetic-dwa-local-planner ros-noetic-teb-local-planner \
+         ros-noetic-move-base ros-noetic-global-planner ros-noetic-dwa-local-planner ros-noetic-teb-local-planner ros-noetic-moveit \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ./entrypoint.sh /
