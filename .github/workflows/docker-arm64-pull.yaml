@@ -1,0 +1,42 @@
+name: Docker ARM64 Pull
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: "${{ secrets.IMAGE_NAME }}"
+
+jobs:
+  build:
+    name: Pull and Package (ARM64)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Setup Docker buildx
+      uses: docker/setup-buildx-action@v3
+
+    # 步骤 1：转换镜像名称
+    - name: Set Clean Image Name
+      run: |
+        CLEAN_STR=$(echo "${{ env.IMAGE_NAME }}" | sed 's/[:/]/_/g')
+        echo "CLEAN_NAME=${CLEAN_STR}_arm64" >> $GITHUB_ENV
+
+    # 步骤 2：拉取 arm64 镜像并通过 gzip 压缩保存
+    - name: Pull and Compress Docker image (ARM64)
+      run: |
+        echo "Pulling ${{ env.IMAGE_NAME }} (platform linux/arm64)..."
+        # runner 是 amd64, 必须显式指定平台, 否则拉到 amd64 镜像
+        docker pull --platform linux/arm64 "${{ env.IMAGE_NAME }}"
+
+        echo "Saving and compressing image to ${{ env.CLEAN_NAME }}.tar.gz ..."
+        # 使用管道配合 gzip 进行高比例压缩
+        docker save "${{ env.IMAGE_NAME }}" | gzip > "${{ env.CLEAN_NAME }}.tar.gz"
+
+    # 步骤 3：上传压缩包到 Action 页面
+    - name: Upload docker artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: "${{ env.CLEAN_NAME }}"
+        path: "${{ env.CLEAN_NAME }}.tar.gz"
